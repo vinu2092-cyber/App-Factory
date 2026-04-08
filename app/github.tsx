@@ -3,9 +3,26 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert,
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, getDefaultGitHubAccount } from '../src/store/useStore';
 import { useRouter } from 'expo-router';
-import { GitHubAutonomousService } from '../src/engine/AgenticEngine';
-import { autoFixBuildError } from '../src/api/geminiApi';
-import { isAIConfigured } from '../src/api/geminiApi';
+
+// Lazy loaded
+let _GitHubAutonomousService: any = null;
+let _autoFixBuildError: any = null;
+
+const loadGitHubService = async () => {
+  if (!_GitHubAutonomousService) {
+    const engine = require('../src/engine/AgenticEngine');
+    _GitHubAutonomousService = engine.GitHubAutonomousService;
+  }
+  return _GitHubAutonomousService;
+};
+
+const loadAutoFix = async () => {
+  if (!_autoFixBuildError) {
+    const gemini = require('../src/api/geminiApi');
+    _autoFixBuildError = gemini.autoFixBuildError;
+  }
+  return _autoFixBuildError;
+};
 
 interface WorkflowRun {
   id: number;
@@ -31,7 +48,7 @@ export default function GitHub() {
   
   const ghAccount = getDefaultGitHubAccount();
   const hasFiles = pendingFiles && Object.keys(pendingFiles).length > 0;
-  const hasAI = isAIConfigured();
+  const hasAI = useStore.getState().aiProviders.length > 0;
 
   // Load workflow runs
   const loadWorkflows = useCallback(async () => {
@@ -39,7 +56,8 @@ export default function GitHub() {
     
     setLoadingWorkflows(true);
     try {
-      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      const Service = await loadGitHubService();
+      const service = new Service(ghAccount.token, ghAccount.username);
       const runs = await service.getWorkflowRuns(linkedRepo);
       setWorkflows(runs);
     } catch (e) {
@@ -71,7 +89,8 @@ export default function GitHub() {
     if (buildLogs[runId]) return; // Already fetched
 
     try {
-      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      const Service = await loadGitHubService();
+      const service = new Service(ghAccount.token, ghAccount.username);
       const { logs, failedStep } = await service.getBuildLogs(linkedRepo, runId);
       setBuildLogs(prev => ({ ...prev, [runId]: logs || 'No detailed logs available.' }));
     } catch (e: any) {
@@ -91,7 +110,8 @@ export default function GitHub() {
     setFixStatus('Fetching build error logs...');
 
     try {
-      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      const Service = await loadGitHubService();
+      const service = new Service(ghAccount.token, ghAccount.username);
       
       // Step 1: Get error logs
       setFixStatus('Analyzing error logs...');
@@ -104,7 +124,8 @@ export default function GitHub() {
 
       // Step 2: Send to AI for fix
       setFixStatus(`AI analyzing: "${failedStep || 'build error'}"...`);
-      const fixResponse = await autoFixBuildError(logs);
+      const autoFix = await loadAutoFix();
+      const fixResponse = await autoFix(logs);
 
       if (fixResponse.files && Object.keys(fixResponse.files).length > 0) {
         // Step 3: Push fix to GitHub
@@ -160,7 +181,8 @@ export default function GitHub() {
 
     setPushing(true);
     try {
-      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      const Service = await loadGitHubService();
+      const service = new Service(ghAccount.token, ghAccount.username);
       
       const repoFullName = await service.createRepository(
         repoName.trim(),

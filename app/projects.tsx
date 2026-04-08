@@ -13,7 +13,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, getDefaultGitHubAccount, Project } from '../src/store/useStore';
-import { GitHubAutonomousService } from '../src/engine/AgenticEngine';
+
+// Lazy loaded
+let _GitHubService: any = null;
+const loadGitHubService = async () => {
+  if (!_GitHubService) {
+    const engine = require('../src/engine/AgenticEngine');
+    _GitHubService = engine.GitHubAutonomousService;
+  }
+  return _GitHubService;
+};
 
 type ViewMode = 'list' | 'detail';
 
@@ -76,7 +85,8 @@ export default function Projects() {
 
     setPushing(true);
     try {
-      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      const Service = await loadGitHubService();
+      const service = new Service(ghAccount.token, ghAccount.username);
       const repoName = project.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
       
       const repoFullName = await service.createRepository(

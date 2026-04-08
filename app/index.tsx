@@ -13,13 +13,34 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, getDefaultGitHubAccount } from '../src/store/useStore';
-import { chatWithGemini, isAIConfigured, getActiveProviderInfo, generateFullProject } from '../src/api/geminiApi';
-import { createAgenticEngine, AgenticEngine, BuildResult } from '../src/engine/AgenticEngine';
+
+// Lazy imports - loaded only when needed, not at startup
+let _chatWithGemini: any = null;
+let _isAIConfigured: any = null;
+let _getActiveProviderInfo: any = null;
+let _generateFullProject: any = null;
+let _createAgenticEngine: any = null;
+
+const loadAIModules = async () => {
+  if (!_chatWithGemini) {
+    const gemini = require('../src/api/geminiApi');
+    _chatWithGemini = gemini.chatWithGemini;
+    _isAIConfigured = gemini.isAIConfigured;
+    _getActiveProviderInfo = gemini.getActiveProviderInfo;
+    _generateFullProject = gemini.generateFullProject;
+  }
+};
+
+const loadEngineModules = async () => {
+  if (!_createAgenticEngine) {
+    const engine = require('../src/engine/AgenticEngine');
+    _createAgenticEngine = engine.createAgenticEngine;
+  }
+};
 
 export default function HomeScreen() {
   const [input, setInput] = useState('');
   const [buildStatus, setBuildStatus] = useState('');
-  const [engine, setEngine] = useState<AgenticEngine | null>(null);
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   
@@ -30,8 +51,11 @@ export default function HomeScreen() {
     addProject
   } = useStore();
   
-  const hasKey = isAIConfigured();
-  const providerInfo = getActiveProviderInfo();
+  const hasKey = useStore.getState().aiProviders.length > 0;
+  const activeProvider = useStore.getState().aiProviders.find(
+    p => p.id === useStore.getState().activeProviderId
+  );
+  const providerInfo = activeProvider ? { name: activeProvider.name, type: activeProvider.type } : null;
   const ghAccount = getDefaultGitHubAccount();
 
   // Scroll to bottom
@@ -40,15 +64,25 @@ export default function HomeScreen() {
   }, []);
 
   // Start autonomous build with self-healing
-  const startAutonomousBuild = useCallback(async (projectEngine: AgenticEngine, repoName: string) => {
+  const startAutonomousBuild = useCallback(async (repoName: string) => {
     if (!ghAccount) {
       Alert.alert('No GitHub Account', 'Add a GitHub account in Settings first');
       return;
     }
 
+    // Lazy load engine
+    await loadEngineModules();
+    if (!_createAgenticEngine) return;
+
     setBuildStatus('Connecting to GitHub...');
     
     try {
+      const projectEngine = _createAgenticEngine(repoName, 'App Factory project');
+      
+      // Load pending files into engine
+      const files = useStore.getState().pendingFiles;
+      if (files) projectEngine.loadFiles(files);
+      
       projectEngine.connectGitHub(ghAccount.token, ghAccount.username);
       
       setBuildStatus('Creating repository...');
@@ -57,26 +91,26 @@ export default function HomeScreen() {
       
       addMessage({ 
         role: 'ai', 
-        content: `✅ Repository created: github.com/${repoFullName}\n\n🚀 Starting autonomous build with ${selfHealingEnabled ? 'self-healing enabled' : 'self-healing disabled'}...` 
+        content: `Repository created: github.com/${repoFullName}\n\nStarting autonomous build with ${selfHealingEnabled ? 'self-healing enabled' : 'self-healing disabled'}...` 
       });
       scrollToBottom();
 
       // Start build with self-healing
       await projectEngine.autonomousBuild(
-        (status) => {
+        (status: string) => {
           setBuildStatus(status);
         },
-        (result: BuildResult) => {
+        (result: any) => {
           setBuildStatus('');
           if (result.success) {
             addMessage({ 
               role: 'ai', 
-              content: `🎉 BUILD SUCCESSFUL!\n\n📦 Download APK from:\n${result.artifactUrl}\n\nGo to Actions → Artifacts → Download` 
+              content: `BUILD SUCCESSFUL!\n\nDownload APK from:\n${result.artifactUrl}\n\nGo to Actions > Artifacts > Download` 
             });
           } else {
             addMessage({ 
               role: 'ai', 
-              content: `❌ Build failed${selfHealingEnabled ? ' after self-healing attempts' : ''}.\n\nError: ${result.failedStep || 'Unknown'}\n\nLogs:\n${result.logs?.slice(0, 500) || 'No logs'}` 
+              content: `Build failed${selfHealingEnabled ? ' after self-healing attempts' : ''}.\n\nError: ${result.failedStep || 'Unknown'}\n\nLogs:\n${result.logs?.slice(0, 500) || 'No logs'}` 
             });
           }
           scrollToBottom();
@@ -84,7 +118,7 @@ export default function HomeScreen() {
       );
     } catch (e: any) {
       setBuildStatus('');
-      addMessage({ role: 'ai', content: `❌ Error: ${e.message}` });
+      addMessage({ role: 'ai', content: `Error: ${e.message}` });
       scrollToBottom();
     }
   }, [ghAccount, selfHealingEnabled, setLinkedRepo, addMessage, scrollToBottom]);
@@ -106,16 +140,19 @@ export default function HomeScreen() {
     scrollToBottom();
 
     try {
+      // Lazy load AI modules
+      await loadAIModules();
+      
       // Check if user wants full project
       const wantsProject = /app|build|create|बनाओ|banao|project/i.test(userInput);
 
       let res;
       if (wantsProject) {
-        addMessage({ role: 'ai', content: '🔧 Generating complete project structure with all files...' });
+        addMessage({ role: 'ai', content: 'Generating complete project structure with all files...' });
         scrollToBottom();
-        res = await generateFullProject(userInput);
+        res = await _generateFullProject(userInput);
       } else {
-        res = await chatWithGemini(userInput);
+        res = await _chatWithGemini(userInput);
       }
       
       if ((res.action === 'write_code' || res.action === 'fix_error') && res.files) {
@@ -127,16 +164,12 @@ export default function HomeScreen() {
           .toLowerCase()
           .replace(/[^a-z0-9-]/g, '') || 'my-app';
         
-        const newEngine = createAgenticEngine(projectName, userInput);
-        newEngine.loadFiles(res.files);
-        setEngine(newEngine);
-        
         const fileCount = Object.keys(res.files).length;
-        const fileList = Object.keys(res.files).slice(0, 15).join('\n• ');
+        const fileList = Object.keys(res.files).slice(0, 15).join('\n- ');
         
         addMessage({ 
           role: 'ai', 
-          content: `✅ Generated ${fileCount} files:\n\n• ${fileList}${fileCount > 15 ? `\n• ... and ${fileCount - 15} more` : ''}\n\n📋 Plan: ${res.plan || 'Project generated'}\n\n📦 Libraries: ${res.libraries?.join(', ') || 'None'}\n\n🔌 Native Modules: ${res.nativeModules?.join(', ') || 'None'}` 
+          content: `Generated ${fileCount} files:\n\n- ${fileList}${fileCount > 15 ? `\n- ... and ${fileCount - 15} more` : ''}\n\nPlan: ${res.plan || 'Project generated'}\n\nLibraries: ${res.libraries?.join(', ') || 'None'}\n\nNative Modules: ${res.nativeModules?.join(', ') || 'None'}` 
         });
         
         setPendingFiles(res.files);
@@ -156,13 +189,13 @@ export default function HomeScreen() {
         // Auto-start build if autonomous mode
         if (autonomousMode && ghAccount) {
           Alert.alert(
-            '🚀 Start Autonomous Build?',
+            'Start Autonomous Build?',
             'Create GitHub repo, push code, and auto-build APK with self-healing?',
             [
               { text: 'Later', style: 'cancel' },
               { 
                 text: 'Start Build', 
-                onPress: () => startAutonomousBuild(newEngine, projectName)
+                onPress: () => startAutonomousBuild(projectName)
               },
             ]
           );
@@ -172,7 +205,7 @@ export default function HomeScreen() {
         scrollToBottom();
       }
     } catch (e: any) {
-      addMessage({ role: 'ai', content: `❌ Error: ${e.message}` });
+      addMessage({ role: 'ai', content: `Error: ${e.message}` });
       scrollToBottom();
     } finally {
       setIsProcessing(false);
