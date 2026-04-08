@@ -1,13 +1,37 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { loadSettings } from '../src/store/useStore';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+
+// Keep splash screen visible while loading
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  const [isReady, setIsReady] = useState(false);
+
   useEffect(() => {
-    loadSettings();
+    async function prepare() {
+      try {
+        // Add any initialization here
+        await new Promise(resolve => setTimeout(resolve, 500));
+      } catch (e) {
+        console.warn(e);
+      } finally {
+        setIsReady(true);
+        await SplashScreen.hideAsync();
+      }
+    }
+    prepare();
   }, []);
+
+  if (!isReady) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator size="large" color="#A78BFA" />
+      </View>
+    );
+  }
 
   return (
     <>
@@ -18,6 +42,7 @@ export default function RootLayout() {
           headerTintColor: '#FFFFFF',
           contentStyle: { backgroundColor: '#0A0A0F' },
           headerTitleStyle: { fontWeight: 'bold' },
+          animation: 'slide_from_right',
         }}
       >
         <Stack.Screen 
@@ -55,3 +80,12 @@ export default function RootLayout() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0A0A0F',
+  },
+});

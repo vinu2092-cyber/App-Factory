@@ -1,16 +1,32 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export interface Project {
+// Types
+export interface APIProvider {
   id: string;
   name: string;
-  description: string;
-  repoName: string;
-  status: 'idle' | 'building' | 'success' | 'failed';
-  lastBuildUrl?: string;
-  lastError?: string;
-  createdAt: string;
-  updatedAt: string;
+  type: 'gemini' | 'groq' | 'deepseek' | 'huggingface' | 'openrouter';
+  apiKey: string;
+  isActive: boolean;
+  addedAt: string;
+}
+
+export interface GitHubAccount {
+  id: string;
+  username: string;
+  token: string;
+  isDefault: boolean;
+  addedAt: string;
+}
+
+export interface ExpoAccount {
+  id: string;
+  username: string;
+  password: string;
+  accessToken?: string;
+  isDefault: boolean;
+  addedAt: string;
 }
 
 export interface Message {
@@ -22,363 +38,261 @@ export interface Message {
   timestamp: string;
 }
 
-// API Provider Types
-export interface APIProvider {
+export interface Project {
   id: string;
   name: string;
-  type: 'gemini' | 'groq' | 'deepseek' | 'huggingface' | 'openrouter';
-  apiKey: string;
-  isActive: boolean;
-  addedAt: string;
-}
-
-// GitHub Account Type
-export interface GitHubAccount {
-  id: string;
-  username: string;
-  token: string;
-  isDefault: boolean;
-  addedAt: string;
-}
-
-// Expo Account Type
-export interface ExpoAccount {
-  id: string;
-  username: string;
-  password: string;
-  accessToken?: string;
-  isDefault: boolean;
-  addedAt: string;
-}
-
-// Build Tool Account Type (Firebase, Play Store, etc.)
-export interface BuildToolAccount {
-  id: string;
-  name: string;
-  type: 'firebase' | 'playstore' | 'appstore' | 'vercel' | 'netlify' | 'custom';
-  credentials: Record<string, string>;
-  isActive: boolean;
-  addedAt: string;
+  description: string;
+  repoName: string;
+  status: 'idle' | 'building' | 'success' | 'failed';
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface AppSettings {
-  // Legacy support
   geminiKeys: string[];
   githubToken: string;
   githubUsername: string;
   expoUsername: string;
   expoPassword: string;
   currentKeyIndex: number;
-  
-  // AI Provider Management
   aiProviders: APIProvider[];
   activeProviderId: string | null;
-  
-  // GitHub Account Management
   githubAccounts: GitHubAccount[];
-  
-  // Expo Account Management
   expoAccounts: ExpoAccount[];
-  
-  // Build Tools Management
-  buildTools: BuildToolAccount[];
-  
-  // AI Agent Features
   autoCorrectMode: boolean;
   autoTestMode: boolean;
   screenshotAnalysis: boolean;
   highPerformanceMode: boolean;
   autoDebugMode: boolean;
-  autonomousMode: boolean; // Full auto mode like Emergent
+  autonomousMode: boolean;
 }
 
 interface AppState {
-  // Settings
   settings: AppSettings;
-  setSettings: (settings: Partial<AppSettings>) => void;
+  messages: Message[];
+  projects: Project[];
+  pendingFiles: Record<string, string> | null;
+  linkedRepo: string | null;
+  isRecording: boolean;
+  isProcessing: boolean;
   
-  // AI Provider Management
+  // Actions
+  setSettings: (settings: Partial<AppSettings>) => void;
   addAIProvider: (provider: Omit<APIProvider, 'id' | 'addedAt'>) => void;
   removeAIProvider: (id: string) => void;
-  updateAIProvider: (id: string, updates: Partial<APIProvider>) => void;
   setActiveAIProvider: (id: string) => void;
-  
-  // GitHub Account Management
   addGitHubAccount: (account: Omit<GitHubAccount, 'id' | 'addedAt'>) => void;
   removeGitHubAccount: (id: string) => void;
-  updateGitHubAccount: (id: string, updates: Partial<GitHubAccount>) => void;
   setDefaultGitHubAccount: (id: string) => void;
-  
-  // Expo Account Management
   addExpoAccount: (account: Omit<ExpoAccount, 'id' | 'addedAt'>) => void;
   removeExpoAccount: (id: string) => void;
-  updateExpoAccount: (id: string, updates: Partial<ExpoAccount>) => void;
   setDefaultExpoAccount: (id: string) => void;
-  
-  // Build Tools Management
-  addBuildTool: (tool: Omit<BuildToolAccount, 'id' | 'addedAt'>) => void;
-  removeBuildTool: (id: string) => void;
-  updateBuildTool: (id: string, updates: Partial<BuildToolAccount>) => void;
-  
-  // Chat
-  messages: Message[];
   addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => void;
   clearMessages: () => void;
-  
-  // Projects
-  projects: Project[];
-  activeProject: Project | null;
-  setActiveProject: (project: Project | null) => void;
-  addProject: (project: Project) => void;
-  updateProject: (id: string, updates: Partial<Project>) => void;
-  
-  // Pending files for GitHub push
-  pendingFiles: Record<string, string> | null;
   setPendingFiles: (files: Record<string, string> | null) => void;
-  
-  // GitHub
-  linkedRepo: string | null;
   setLinkedRepo: (repo: string | null) => void;
-  
-  // UI State
-  isRecording: boolean;
   setIsRecording: (value: boolean) => void;
-  isProcessing: boolean;
   setIsProcessing: (value: boolean) => void;
 }
 
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
-export const useStore = create<AppState>((set, get) => ({
-  // Settings
-  settings: {
-    // Legacy
-    geminiKeys: ['', '', '', ''],
-    githubToken: '',
-    githubUsername: '',
-    expoUsername: '',
-    expoPassword: '',
-    currentKeyIndex: 0,
-    
-    // New Management Systems
-    aiProviders: [],
-    activeProviderId: null,
-    githubAccounts: [],
-    expoAccounts: [],
-    buildTools: [],
-    
-    // Features
-    autoCorrectMode: true,
-    autoTestMode: true,
-    screenshotAnalysis: true,
-    highPerformanceMode: true,
-    autoDebugMode: true,
-    autonomousMode: true,
-  },
-  
-  setSettings: (newSettings) => {
-    const updatedSettings = { ...get().settings, ...newSettings };
-    set({ settings: updatedSettings });
-    AsyncStorage.setItem('appfactory_settings', JSON.stringify(updatedSettings));
-  },
-  
-  // AI Provider Management
-  addAIProvider: (provider) => {
-    const newProvider: APIProvider = {
-      ...provider,
-      id: generateId(),
-      addedAt: new Date().toISOString(),
-    };
-    const updatedProviders = [...get().settings.aiProviders, newProvider];
-    get().setSettings({ 
-      aiProviders: updatedProviders,
-      activeProviderId: get().settings.activeProviderId || newProvider.id
-    });
-  },
-  
-  removeAIProvider: (id) => {
-    const updatedProviders = get().settings.aiProviders.filter(p => p.id !== id);
-    const activeId = get().settings.activeProviderId === id 
-      ? (updatedProviders[0]?.id || null)
-      : get().settings.activeProviderId;
-    get().setSettings({ aiProviders: updatedProviders, activeProviderId: activeId });
-  },
-  
-  updateAIProvider: (id, updates) => {
-    const updatedProviders = get().settings.aiProviders.map(p => 
-      p.id === id ? { ...p, ...updates } : p
-    );
-    get().setSettings({ aiProviders: updatedProviders });
-  },
-  
-  setActiveAIProvider: (id) => {
-    get().setSettings({ activeProviderId: id });
-  },
-  
-  // GitHub Account Management
-  addGitHubAccount: (account) => {
-    const newAccount: GitHubAccount = {
-      ...account,
-      id: generateId(),
-      addedAt: new Date().toISOString(),
-    };
-    const updatedAccounts = [...get().settings.githubAccounts, newAccount];
-    // Set as default if it's the first one
-    if (updatedAccounts.length === 1) {
-      newAccount.isDefault = true;
-    }
-    get().setSettings({ githubAccounts: updatedAccounts });
-  },
-  
-  removeGitHubAccount: (id) => {
-    const updatedAccounts = get().settings.githubAccounts.filter(a => a.id !== id);
-    // If removed account was default, set first one as default
-    if (updatedAccounts.length > 0 && !updatedAccounts.some(a => a.isDefault)) {
-      updatedAccounts[0].isDefault = true;
-    }
-    get().setSettings({ githubAccounts: updatedAccounts });
-  },
-  
-  updateGitHubAccount: (id, updates) => {
-    const updatedAccounts = get().settings.githubAccounts.map(a =>
-      a.id === id ? { ...a, ...updates } : a
-    );
-    get().setSettings({ githubAccounts: updatedAccounts });
-  },
-  
-  setDefaultGitHubAccount: (id) => {
-    const updatedAccounts = get().settings.githubAccounts.map(a => ({
-      ...a,
-      isDefault: a.id === id,
-    }));
-    get().setSettings({ githubAccounts: updatedAccounts });
-  },
-  
-  // Expo Account Management
-  addExpoAccount: (account) => {
-    const newAccount: ExpoAccount = {
-      ...account,
-      id: generateId(),
-      addedAt: new Date().toISOString(),
-    };
-    const updatedAccounts = [...get().settings.expoAccounts, newAccount];
-    if (updatedAccounts.length === 1) {
-      newAccount.isDefault = true;
-    }
-    get().setSettings({ expoAccounts: updatedAccounts });
-  },
-  
-  removeExpoAccount: (id) => {
-    const updatedAccounts = get().settings.expoAccounts.filter(a => a.id !== id);
-    if (updatedAccounts.length > 0 && !updatedAccounts.some(a => a.isDefault)) {
-      updatedAccounts[0].isDefault = true;
-    }
-    get().setSettings({ expoAccounts: updatedAccounts });
-  },
-  
-  updateExpoAccount: (id, updates) => {
-    const updatedAccounts = get().settings.expoAccounts.map(a =>
-      a.id === id ? { ...a, ...updates } : a
-    );
-    get().setSettings({ expoAccounts: updatedAccounts });
-  },
-  
-  setDefaultExpoAccount: (id) => {
-    const updatedAccounts = get().settings.expoAccounts.map(a => ({
-      ...a,
-      isDefault: a.id === id,
-    }));
-    get().setSettings({ expoAccounts: updatedAccounts });
-  },
-  
-  // Build Tools Management
-  addBuildTool: (tool) => {
-    const newTool: BuildToolAccount = {
-      ...tool,
-      id: generateId(),
-      addedAt: new Date().toISOString(),
-    };
-    const updatedTools = [...get().settings.buildTools, newTool];
-    get().setSettings({ buildTools: updatedTools });
-  },
-  
-  removeBuildTool: (id) => {
-    const updatedTools = get().settings.buildTools.filter(t => t.id !== id);
-    get().setSettings({ buildTools: updatedTools });
-  },
-  
-  updateBuildTool: (id, updates) => {
-    const updatedTools = get().settings.buildTools.map(t =>
-      t.id === id ? { ...t, ...updates } : t
-    );
-    get().setSettings({ buildTools: updatedTools });
-  },
-  
-  // Chat
-  messages: [],
-  addMessage: (message) => set((state) => ({
-    messages: [...state.messages, {
-      ...message,
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-    }]
-  })),
-  clearMessages: () => set({ messages: [] }),
-  
-  // Projects
-  projects: [],
-  activeProject: null,
-  setActiveProject: (project) => set({ activeProject: project }),
-  addProject: (project) => set((state) => ({ projects: [...state.projects, project] })),
-  updateProject: (id, updates) => set((state) => ({
-    projects: state.projects.map(p => p.id === id ? { ...p, ...updates } : p)
-  })),
-  
-  // Pending files
-  pendingFiles: null,
-  setPendingFiles: (files) => set({ pendingFiles: files }),
-  
-  // GitHub
-  linkedRepo: null,
-  setLinkedRepo: (repo) => set({ linkedRepo: repo }),
-  
-  // UI State
-  isRecording: false,
-  setIsRecording: (value) => set({ isRecording: value }),
-  isProcessing: false,
-  setIsProcessing: (value) => set({ isProcessing: value }),
-}));
-
-// Load settings on app start
-export const loadSettings = async () => {
-  try {
-    const stored = await AsyncStorage.getItem('appfactory_settings');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      useStore.getState().setSettings(parsed);
-    }
-  } catch (e) {
-    console.error('Failed to load settings:', e);
-  }
+const defaultSettings: AppSettings = {
+  geminiKeys: [''],
+  githubToken: '',
+  githubUsername: '',
+  expoUsername: '',
+  expoPassword: '',
+  currentKeyIndex: 0,
+  aiProviders: [],
+  activeProviderId: null,
+  githubAccounts: [],
+  expoAccounts: [],
+  autoCorrectMode: true,
+  autoTestMode: true,
+  screenshotAnalysis: true,
+  highPerformanceMode: true,
+  autoDebugMode: true,
+  autonomousMode: true,
 };
 
-// Helper to get active AI provider
+export const useStore = create<AppState>()(
+  persist(
+    (set, get) => ({
+      settings: defaultSettings,
+      messages: [],
+      projects: [],
+      pendingFiles: null,
+      linkedRepo: null,
+      isRecording: false,
+      isProcessing: false,
+
+      setSettings: (newSettings) => {
+        set((state) => ({
+          settings: { ...state.settings, ...newSettings },
+        }));
+      },
+
+      addAIProvider: (provider) => {
+        const newProvider: APIProvider = {
+          ...provider,
+          id: generateId(),
+          addedAt: new Date().toISOString(),
+        };
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            aiProviders: [...state.settings.aiProviders, newProvider],
+            activeProviderId: state.settings.activeProviderId || newProvider.id,
+          },
+        }));
+      },
+
+      removeAIProvider: (id) => {
+        set((state) => {
+          const updatedProviders = state.settings.aiProviders.filter((p) => p.id !== id);
+          return {
+            settings: {
+              ...state.settings,
+              aiProviders: updatedProviders,
+              activeProviderId:
+                state.settings.activeProviderId === id
+                  ? updatedProviders[0]?.id || null
+                  : state.settings.activeProviderId,
+            },
+          };
+        });
+      },
+
+      setActiveAIProvider: (id) => {
+        set((state) => ({
+          settings: { ...state.settings, activeProviderId: id },
+        }));
+      },
+
+      addGitHubAccount: (account) => {
+        const newAccount: GitHubAccount = {
+          ...account,
+          id: generateId(),
+          addedAt: new Date().toISOString(),
+          isDefault: get().settings.githubAccounts.length === 0,
+        };
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            githubAccounts: [...state.settings.githubAccounts, newAccount],
+          },
+        }));
+      },
+
+      removeGitHubAccount: (id) => {
+        set((state) => {
+          const updated = state.settings.githubAccounts.filter((a) => a.id !== id);
+          if (updated.length > 0 && !updated.some((a) => a.isDefault)) {
+            updated[0].isDefault = true;
+          }
+          return {
+            settings: { ...state.settings, githubAccounts: updated },
+          };
+        });
+      },
+
+      setDefaultGitHubAccount: (id) => {
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            githubAccounts: state.settings.githubAccounts.map((a) => ({
+              ...a,
+              isDefault: a.id === id,
+            })),
+          },
+        }));
+      },
+
+      addExpoAccount: (account) => {
+        const newAccount: ExpoAccount = {
+          ...account,
+          id: generateId(),
+          addedAt: new Date().toISOString(),
+          isDefault: get().settings.expoAccounts.length === 0,
+        };
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            expoAccounts: [...state.settings.expoAccounts, newAccount],
+          },
+        }));
+      },
+
+      removeExpoAccount: (id) => {
+        set((state) => {
+          const updated = state.settings.expoAccounts.filter((a) => a.id !== id);
+          if (updated.length > 0 && !updated.some((a) => a.isDefault)) {
+            updated[0].isDefault = true;
+          }
+          return {
+            settings: { ...state.settings, expoAccounts: updated },
+          };
+        });
+      },
+
+      setDefaultExpoAccount: (id) => {
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            expoAccounts: state.settings.expoAccounts.map((a) => ({
+              ...a,
+              isDefault: a.id === id,
+            })),
+          },
+        }));
+      },
+
+      addMessage: (message) => {
+        set((state) => ({
+          messages: [
+            ...state.messages,
+            {
+              ...message,
+              id: generateId(),
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        }));
+      },
+
+      clearMessages: () => set({ messages: [] }),
+      setPendingFiles: (files) => set({ pendingFiles: files }),
+      setLinkedRepo: (repo) => set({ linkedRepo: repo }),
+      setIsRecording: (value) => set({ isRecording: value }),
+      setIsProcessing: (value) => set({ isProcessing: value }),
+    }),
+    {
+      name: 'app-factory-storage',
+      storage: createJSONStorage(() => AsyncStorage),
+      partialize: (state) => ({
+        settings: state.settings,
+        projects: state.projects,
+      }),
+    }
+  )
+);
+
+// Helper functions
 export const getActiveAIProvider = (): APIProvider | null => {
   const { settings } = useStore.getState();
   if (settings.activeProviderId) {
-    return settings.aiProviders.find(p => p.id === settings.activeProviderId) || null;
+    return settings.aiProviders.find((p) => p.id === settings.activeProviderId) || null;
   }
-  return settings.aiProviders.find(p => p.isActive) || settings.aiProviders[0] || null;
+  return settings.aiProviders[0] || null;
 };
 
-// Helper to get default GitHub account
 export const getDefaultGitHubAccount = (): GitHubAccount | null => {
   const { settings } = useStore.getState();
-  return settings.githubAccounts.find(a => a.isDefault) || settings.githubAccounts[0] || null;
+  return settings.githubAccounts.find((a) => a.isDefault) || settings.githubAccounts[0] || null;
 };
 
-// Helper to get default Expo account
 export const getDefaultExpoAccount = (): ExpoAccount | null => {
   const { settings } = useStore.getState();
-  return settings.expoAccounts.find(a => a.isDefault) || settings.expoAccounts[0] || null;
+  return settings.expoAccounts.find((a) => a.isDefault) || settings.expoAccounts[0] || null;
 };
