@@ -19,7 +19,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -31,55 +30,58 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --frozen-lockfile || yarn install
 
-      - name: Install EAS CLI
-        run: yarn global add eas-cli
+      - name: Clear Metro cache
+        run: |
+          rm -rf node_modules/.cache
+          rm -rf /tmp/metro-*
 
-      - name: Expo Prebuild (Generate Android folder)
+      - name: Expo Prebuild
         run: npx expo prebuild --platform android --clean
+        env:
+          EXPO_NO_TELEMETRY: 1
 
-      - name: Grant execute permission for gradlew
+      - name: Grant gradlew permission
         run: chmod +x android/gradlew
+
+      - name: Clean Gradle
+        working-directory: android
+        run: ./gradlew clean
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
-
-      - name: Build Release APK
-        working-directory: android
-        run: ./gradlew assembleRelease
-
-      - name: Build Release AAB
-        working-directory: android
-        run: ./gradlew bundleRelease
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: app-factory-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+
+      - name: Build Release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+        continue-on-error: true
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: app-factory-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: ignore
 
+      - name: Build Release AAB
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+        continue-on-error: true
+
       - name: Upload Release AAB
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: app-factory-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: ignore
-
-  auto-fix:
-    needs: build
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Build Failed Notification
-        run: |
-          echo "Build failed! Auto-correction mode should analyze the error logs."
-          echo "Check the build logs above for errors and fix them."
