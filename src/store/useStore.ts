@@ -18,7 +18,15 @@ export interface ExpoAccount {
   id: string;
   username: string;
   password: string;
+  accessToken?: string;
   isDefault: boolean;
+}
+
+export interface BuildTool {
+  id: string;
+  name: string;
+  type: string;
+  credentials: string;
 }
 
 export interface Message {
@@ -29,31 +37,36 @@ export interface Message {
 }
 
 interface AppState {
-  // AI Providers
+  // AI Providers (Gemini, Groq, DeepSeek, HuggingFace, OpenRouter)
   aiProviders: APIProvider[];
   activeProviderId: string | null;
   addAIProvider: (provider: Omit<APIProvider, 'id'>) => void;
   removeAIProvider: (id: string) => void;
   setActiveAIProvider: (id: string) => void;
   
-  // GitHub
+  // GitHub Accounts
   githubAccounts: GitHubAccount[];
   addGitHubAccount: (account: Omit<GitHubAccount, 'id'>) => void;
   removeGitHubAccount: (id: string) => void;
   setDefaultGitHubAccount: (id: string) => void;
   
-  // Expo
+  // Expo Accounts
   expoAccounts: ExpoAccount[];
   addExpoAccount: (account: Omit<ExpoAccount, 'id'>) => void;
   removeExpoAccount: (id: string) => void;
   setDefaultExpoAccount: (id: string) => void;
   
-  // Chat
+  // Build Tools (Firebase, Play Store, etc.)
+  buildTools: BuildTool[];
+  addBuildTool: (tool: Omit<BuildTool, 'id'>) => void;
+  removeBuildTool: (id: string) => void;
+  
+  // Chat Messages
   messages: Message[];
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => void;
   clearMessages: () => void;
   
-  // UI State
+  // Project State
   isProcessing: boolean;
   setIsProcessing: (v: boolean) => void;
   linkedRepo: string | null;
@@ -61,12 +74,19 @@ interface AppState {
   pendingFiles: Record<string, string> | null;
   setPendingFiles: (files: Record<string, string> | null) => void;
   
-  // Settings
+  // AI Agent Settings
   autonomousMode: boolean;
   autoTestMode: boolean;
   autoDebugMode: boolean;
   screenshotAnalysis: boolean;
-  setSettings: (s: Partial<{autonomousMode: boolean; autoTestMode: boolean; autoDebugMode: boolean; screenshotAnalysis: boolean}>) => void;
+  selfHealingEnabled: boolean;
+  setSettings: (s: Partial<{
+    autonomousMode: boolean;
+    autoTestMode: boolean;
+    autoDebugMode: boolean;
+    screenshotAnalysis: boolean;
+    selfHealingEnabled: boolean;
+  }>) => void;
 }
 
 const genId = () => Math.random().toString(36).substr(2, 9);
@@ -93,7 +113,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setActiveAIProvider: (id) => set({ activeProviderId: id }),
   
-  // GitHub
+  // GitHub Accounts
   githubAccounts: [],
   addGitHubAccount: (account) => {
     const isFirst = get().githubAccounts.length === 0;
@@ -116,7 +136,7 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
   
-  // Expo
+  // Expo Accounts
   expoAccounts: [],
   addExpoAccount: (account) => {
     const isFirst = get().expoAccounts.length === 0;
@@ -139,6 +159,19 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
   
+  // Build Tools
+  buildTools: [],
+  addBuildTool: (tool) => {
+    set((s) => ({
+      buildTools: [...s.buildTools, { ...tool, id: genId() }],
+    }));
+  },
+  removeBuildTool: (id) => {
+    set((s) => ({
+      buildTools: s.buildTools.filter((t) => t.id !== id),
+    }));
+  },
+  
   // Chat
   messages: [],
   addMessage: (msg) => {
@@ -148,7 +181,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   clearMessages: () => set({ messages: [] }),
   
-  // UI
+  // Project
   isProcessing: false,
   setIsProcessing: (v) => set({ isProcessing: v }),
   linkedRepo: null,
@@ -156,14 +189,16 @@ export const useStore = create<AppState>((set, get) => ({
   pendingFiles: null,
   setPendingFiles: (files) => set({ pendingFiles: files }),
   
-  // Settings
+  // AI Agent Settings
   autonomousMode: true,
   autoTestMode: true,
   autoDebugMode: true,
   screenshotAnalysis: true,
+  selfHealingEnabled: true,
   setSettings: (s) => set(s),
 }));
 
+// Helper Functions
 export const getActiveAIProvider = (): APIProvider | null => {
   const state = useStore.getState();
   if (state.activeProviderId) {
@@ -175,4 +210,9 @@ export const getActiveAIProvider = (): APIProvider | null => {
 export const getDefaultGitHubAccount = (): GitHubAccount | null => {
   const state = useStore.getState();
   return state.githubAccounts.find((a) => a.isDefault) || state.githubAccounts[0] || null;
+};
+
+export const getDefaultExpoAccount = (): ExpoAccount | null => {
+  const state = useStore.getState();
+  return state.expoAccounts.find((a) => a.isDefault) || state.expoAccounts[0] || null;
 };

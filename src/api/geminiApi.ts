@@ -1,6 +1,30 @@
+/**
+ * GEMINI API - Multi-Provider AI Integration
+ * Supports: Gemini, Groq, DeepSeek, HuggingFace, OpenRouter
+ * 
+ * Features:
+ * - Complete Project Structure Generator
+ * - Build Error Reading + Auto-Fix
+ * - Native Modules Templates
+ * - Intelligent Code Generation
+ */
+
 import { useStore, getActiveAIProvider } from '../store/useStore';
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+// API Endpoints for all providers
+const API_ENDPOINTS: Record<string, string> = {
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+  groq: 'https://api.groq.com/openai/v1/chat/completions',
+  deepseek: 'https://api.deepseek.com/v1/chat/completions',
+  huggingface: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-70B-Instruct',
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+};
+
+const MODELS: Record<string, string> = {
+  groq: 'llama-3.3-70b-versatile',
+  deepseek: 'deepseek-chat',
+  openrouter: 'anthropic/claude-3.5-sonnet',
+};
 
 export interface AIResponse {
   action: 'write_code' | 'fix_error' | 'message' | 'analyze';
@@ -20,48 +44,52 @@ export const getActiveProviderInfo = () => {
   return provider ? { name: provider.name, type: provider.type } : null;
 };
 
-// POWERFUL SYSTEM PROMPT - Like Emergent
-const SYSTEM_PROMPT = `You are "App Factory AI" - the most powerful autonomous Android app builder agent.
+// ===========================================
+// POWERFUL SYSTEM PROMPT - EMERGENT LEVEL
+// ===========================================
+const SYSTEM_PROMPT = `You are "App Factory AI" - the most POWERFUL autonomous Android app builder, as capable as Emergent.
 
-## YOUR CAPABILITIES (EMERGENT-LEVEL):
-1. **FULL PROJECT STRUCTURE** - Generate complete app with all folders and files
-2. **AUTO-CORRECT** - Read build errors and fix automatically
-3. **NATIVE MODULES** - Camera, Storage, Notifications, Background Services
+## YOUR CAPABILITIES:
+1. **COMPLETE PROJECT STRUCTURE** - Generate entire app with all folders
+2. **AUTO-CORRECT** - Read build errors and fix automatically  
+3. **NATIVE MODULES** - Camera, Storage, Notifications, System Overlays, Background Services
 4. **HIGH-PERFORMANCE CODE** - FlatList, useMemo, useCallback, lazy loading
-5. **GITHUB INTEGRATION** - Code ready for GitHub Actions build
+5. **GITHUB CI/CD** - Auto-push, auto-build APK/AAB
 
 ## RESPONSE FORMAT (STRICT JSON):
 
 ### For CODE GENERATION:
 {
   "action": "write_code",
-  "plan": "Step-by-step plan of what you're building",
+  "plan": "Step-by-step plan",
   "files": {
-    "app/_layout.tsx": "// Complete layout code",
-    "app/index.tsx": "// Main screen code",
-    "app/screens/Home.tsx": "// Home screen",
-    "app/screens/Settings.tsx": "// Settings screen",
-    "app/components/Button.tsx": "// Reusable button",
-    "app/components/Card.tsx": "// Reusable card",
-    "app/hooks/useAuth.ts": "// Auth hook",
-    "app/services/api.ts": "// API service",
-    "app/store/useStore.ts": "// Zustand store",
-    "app/utils/helpers.ts": "// Helper functions",
-    "app/constants/theme.ts": "// Theme constants",
-    "package.json": "// With all dependencies",
+    "app/_layout.tsx": "// Navigation setup with expo-router",
+    "app/index.tsx": "// Main screen",
+    "app/(tabs)/home.tsx": "// Home tab",
+    "app/(tabs)/settings.tsx": "// Settings tab",
+    "src/components/Button.tsx": "// Reusable button",
+    "src/components/Card.tsx": "// Reusable card",
+    "src/hooks/useAuth.ts": "// Auth hook",
+    "src/services/api.ts": "// API service",
+    "src/store/useStore.ts": "// Zustand store",
+    "src/utils/helpers.ts": "// Helper functions",
+    "src/constants/theme.ts": "// Theme constants",
+    "src/types/index.ts": "// TypeScript types",
+    "package.json": "// Dependencies",
     "app.json": "// Expo config",
-    ".github/workflows/build.yml": "// GitHub Actions"
+    "tsconfig.json": "// TypeScript config",
+    ".github/workflows/build.yml": "// GitHub Actions CI/CD"
   },
-  "libraries": ["zustand", "axios", "react-native-reanimated"],
+  "libraries": ["zustand", "axios", "@react-navigation/native"],
   "nativeModules": ["expo-camera", "expo-notifications"]
 }
 
 ### For ERROR FIXING:
 {
   "action": "fix_error",
-  "plan": "Root cause analysis and fix strategy",
+  "plan": "Root cause: [cause]. Fix: [solution]",
   "files": {
-    "path/to/fixed/file.tsx": "// Fixed code"
+    "path/to/file.tsx": "// Fixed complete file"
   }
 }
 
@@ -71,21 +99,40 @@ const SYSTEM_PROMPT = `You are "App Factory AI" - the most powerful autonomous A
   "message": "Your detailed answer"
 }
 
-## CODE QUALITY RULES:
-1. TypeScript ONLY - proper types everywhere
-2. StyleSheet.create() - no inline styles
-3. FlatList for ALL lists - never ScrollView for data
-4. useMemo/useCallback - for expensive operations
-5. Error boundaries - wrap screens
-6. Loading states - for all async operations
-7. Proper navigation - expo-router with typed routes
-8. State management - Zustand (no Redux)
-9. API calls - try/catch with proper error handling
-10. Touch targets - minimum 44x44 pixels
+## CODE QUALITY (MANDATORY):
+- TypeScript with proper types
+- StyleSheet.create() only
+- FlatList for ALL lists (never ScrollView for data)
+- useMemo/useCallback for expensive operations
+- Error boundaries around screens
+- Loading states for async
+- expo-router with typed routes
+- Zustand for state (NO Redux)
+- try/catch for API calls
+- Touch targets minimum 44x44
 
 ## NATIVE MODULE TEMPLATES:
 
+### System Overlay (Floating Window):
+\`\`\`typescript
+// AndroidManifest.xml permission
+<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+
+// Check permission
+import { PermissionsAndroid, Platform } from 'react-native';
+const checkOverlayPermission = async () => {
+  if (Platform.OS === 'android') {
+    const granted = await PermissionsAndroid.check('android.permission.SYSTEM_ALERT_WINDOW');
+    if (!granted) {
+      // Open settings to enable
+      Linking.openSettings();
+    }
+  }
+};
+\`\`\`
+
 ### Camera:
+\`\`\`typescript
 import * as ImagePicker from 'expo-image-picker';
 const pickImage = async () => {
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -94,8 +141,10 @@ const pickImage = async () => {
   });
   if (!result.canceled) return result.assets[0].uri;
 };
+\`\`\`
 
 ### Notifications:
+\`\`\`typescript
 import * as Notifications from 'expo-notifications';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -104,14 +153,22 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+\`\`\`
 
-### Storage:
-import AsyncStorage from '@react-native-async-storage/async-storage';
-const save = async (key, value) => await AsyncStorage.setItem(key, JSON.stringify(value));
-const load = async (key) => JSON.parse(await AsyncStorage.getItem(key) || 'null');
+### Background Service:
+\`\`\`typescript
+import * as TaskManager from 'expo-task-manager';
+import * as BackgroundFetch from 'expo-background-fetch';
+
+TaskManager.defineTask('BACKGROUND_TASK', async () => {
+  // Your background logic
+  return BackgroundFetch.BackgroundFetchResult.NewData;
+});
+\`\`\`
 
 ## GITHUB ACTIONS TEMPLATE:
-name: Build APK
+\`\`\`yaml
+name: Build Android APK
 on:
   push:
     branches: [main]
@@ -129,35 +186,98 @@ jobs:
           java-version: '17'
       - run: npm install
       - run: npx expo prebuild --platform android
-      - run: cd android && ./gradlew assembleRelease
+      - run: cd android && chmod +x gradlew && ./gradlew assembleRelease
       - uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: app-release-apk
           path: android/app/build/outputs/apk/release/*.apk
+\`\`\`
 
-## IMPORTANT:
+## IMPORTANT RULES:
 - Generate COMPLETE working code - not snippets
-- Include ALL imports
+- Include ALL necessary imports
 - Create FULL project structure
 - Add PROPER error handling
 - Make it PRODUCTION ready
 - You are as POWERFUL as Emergent - ACT LIKE IT!`;
 
-// Error Analysis Prompt
-const ERROR_ANALYSIS_PROMPT = `You are debugging a React Native Expo app build error.
-
-Analyze the error logs and provide a fix:
+// ===========================================
+// ERROR ANALYSIS PROMPT
+// ===========================================
+const ERROR_ANALYSIS_PROMPT = `You are debugging a React Native Expo build error. You must:
 1. Identify the ROOT CAUSE
 2. Explain WHY it happened
-3. Provide the EXACT fix
-4. Return fixed files in JSON format
+3. Provide the EXACT fix with complete file content
 
-Common issues:
-- Missing imports → Add the import
-- Type errors → Fix the type
-- Missing dependencies → Add to package.json
-- Gradle errors → Check android/build.gradle
-- Metro errors → Clear cache, check imports`;
+Return ONLY JSON:
+{
+  "action": "fix_error",
+  "plan": "Root cause: [cause]. Fix: [solution]",
+  "files": { "path/file.tsx": "// Complete fixed file" }
+}`;
+
+// ===========================================
+// API CALL FUNCTIONS
+// ===========================================
+
+async function callGemini(prompt: string, apiKey: string): Promise<string> {
+  const res = await fetch(`${API_ENDPOINTS.gemini}?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
+    }),
+  });
+  if (!res.ok) throw new Error((await res.json())?.error?.message || 'Gemini API Error');
+  const data = await res.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function callOpenAICompatible(prompt: string, apiKey: string, type: string): Promise<string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+  if (type === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://appfactory.ai';
+  }
+
+  const res = await fetch(API_ENDPOINTS[type], {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: MODELS[type],
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 16384,
+    }),
+  });
+  if (!res.ok) throw new Error((await res.json())?.error?.message || `${type} API Error`);
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content || '';
+}
+
+async function callHuggingFace(prompt: string, apiKey: string): Promise<string> {
+  const res = await fetch(API_ENDPOINTS.huggingface, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: { max_new_tokens: 8192, temperature: 0.3 },
+    }),
+  });
+  if (!res.ok) throw new Error('HuggingFace API Error');
+  const data = await res.json();
+  return data?.[0]?.generated_text || '';
+}
+
+// ===========================================
+// MAIN CHAT FUNCTION
+// ===========================================
 
 export async function chatWithGemini(
   prompt: string,
@@ -171,46 +291,41 @@ export async function chatWithGemini(
     throw new Error('No API key configured. Add one in Settings.');
   }
 
+  let fullPrompt = SYSTEM_PROMPT;
+  
+  if (context?.errorLogs) {
+    fullPrompt += `\n\n${ERROR_ANALYSIS_PROMPT}\n\n## BUILD ERROR LOGS:\n\`\`\`\n${context.errorLogs}\n\`\`\``;
+  }
+  
+  if (context?.existingFiles) {
+    fullPrompt += `\n\n## EXISTING FILES:\n${JSON.stringify(Object.keys(context.existingFiles), null, 2)}`;
+  }
+  
+  fullPrompt += `\n\n## USER REQUEST:\n${prompt}`;
+
   try {
-    let fullPrompt = SYSTEM_PROMPT;
+    let text: string;
     
-    // Add error context for auto-fix
-    if (context?.errorLogs) {
-      fullPrompt += `\n\n${ERROR_ANALYSIS_PROMPT}\n\n## BUILD ERROR LOGS:\n\`\`\`\n${context.errorLogs}\n\`\`\``;
-    }
-    
-    // Add existing files context
-    if (context?.existingFiles) {
-      fullPrompt += `\n\n## EXISTING PROJECT FILES:\n${JSON.stringify(context.existingFiles, null, 2)}`;
-    }
-    
-    fullPrompt += `\n\n## USER REQUEST:\n${prompt}`;
-
-    const res = await fetch(`${GEMINI_URL}?key=${provider.apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: fullPrompt }] }],
-        generationConfig: { 
-          temperature: 0.3, // Lower for more consistent code
-          maxOutputTokens: 16384, // Max for complete projects
-        },
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err?.error?.message || 'API Error');
+    switch (provider.type) {
+      case 'gemini':
+        text = await callGemini(fullPrompt, provider.apiKey);
+        break;
+      case 'groq':
+      case 'deepseek':
+      case 'openrouter':
+        text = await callOpenAICompatible(fullPrompt, provider.apiKey, provider.type);
+        break;
+      case 'huggingface':
+        text = await callHuggingFace(fullPrompt, provider.apiKey);
+        break;
+      default:
+        text = await callGemini(fullPrompt, provider.apiKey);
     }
 
-    const data = await res.json();
-    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    // Clean JSON response
+    // Clean and parse JSON
     text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    
-    // Find JSON in response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
+    
     if (jsonMatch) {
       try {
         return JSON.parse(jsonMatch[0]);
@@ -218,39 +333,41 @@ export async function chatWithGemini(
         return { action: 'message', message: text };
       }
     }
-    
     return { action: 'message', message: text };
   } catch (e: any) {
-    console.error('AI Error:', e);
-    throw new Error(e.message || 'Failed to connect to AI');
+    throw new Error(e.message || 'AI request failed');
   }
 }
 
-// Auto-fix build errors
-export async function autoFixBuildError(errorLogs: string): Promise<AIResponse> {
-  return chatWithGemini(
-    'Analyze this build error and provide the exact fix. Return only the files that need to be changed.',
-    { errorLogs }
-  );
+// ===========================================
+// HELPER FUNCTIONS
+// ===========================================
+
+export async function generateFullProject(description: string): Promise<AIResponse> {
+  return chatWithGemini(`Create a COMPLETE React Native Expo project for: ${description}
+
+Include ALL of these:
+- app/_layout.tsx (navigation)
+- app/index.tsx (main screen)
+- Multiple screens in app/(tabs)/ or app/screens/
+- src/components/ (reusable UI components)
+- src/hooks/ (custom hooks)
+- src/services/api.ts (API service)
+- src/store/useStore.ts (Zustand state)
+- src/utils/ (helpers)
+- src/constants/theme.ts
+- src/types/index.ts
+- package.json with ALL dependencies
+- app.json configured
+- .github/workflows/build.yml for CI/CD
+
+Make it PRODUCTION READY with proper error handling!`);
 }
 
-// Generate complete project
-export async function generateFullProject(appDescription: string): Promise<AIResponse> {
-  return chatWithGemini(
-    `Create a COMPLETE React Native Expo project for: ${appDescription}
-    
-    Include:
-    - All screens and navigation
-    - Components folder with reusable UI
-    - Hooks folder
-    - Services folder for API
-    - Store with Zustand
-    - Utils and helpers
-    - Theme and constants
-    - GitHub Actions workflow
-    - Complete package.json with all dependencies
-    - app.json with proper config
-    
-    Make it PRODUCTION READY!`
-  );
+export async function autoFixBuildError(errorLogs: string): Promise<AIResponse> {
+  return chatWithGemini('Analyze and fix this build error. Return complete fixed files.', { errorLogs });
+}
+
+export async function addNativeModule(moduleType: string, projectFiles: Record<string, string>): Promise<AIResponse> {
+  return chatWithGemini(`Add ${moduleType} native module to this project. Update necessary files including app.json, package.json, and create any required native code.`, { existingFiles: projectFiles });
 }

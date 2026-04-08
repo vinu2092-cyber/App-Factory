@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore, getDefaultGitHubAccount } from '../src/store/useStore';
 import { chatWithGemini, isAIConfigured, getActiveProviderInfo, generateFullProject } from '../src/api/geminiApi';
-import { createAgenticEngine, AgenticEngine } from '../src/engine/AgenticEngine';
+import { createAgenticEngine, AgenticEngine, BuildResult } from '../src/engine/AgenticEngine';
 
 export default function HomeScreen() {
   const [input, setInput] = useState('');
@@ -23,59 +23,72 @@ export default function HomeScreen() {
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   
-  const { messages, addMessage, isProcessing, setIsProcessing, setPendingFiles, linkedRepo, setLinkedRepo } = useStore();
+  const { 
+    messages, addMessage, isProcessing, setIsProcessing, 
+    setPendingFiles, linkedRepo, setLinkedRepo,
+    autonomousMode, selfHealingEnabled 
+  } = useStore();
+  
   const hasKey = isAIConfigured();
   const providerInfo = getActiveProviderInfo();
   const ghAccount = getDefaultGitHubAccount();
 
-  // AUTONOMOUS BUILD FLOW
-  const startAutonomousBuild = useCallback(async (repoName: string) => {
-    if (!engine || !ghAccount) return;
+  // Scroll to bottom
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+  }, []);
 
-    setBuildStatus('Starting autonomous build...');
+  // Start autonomous build with self-healing
+  const startAutonomousBuild = useCallback(async (projectEngine: AgenticEngine, repoName: string) => {
+    if (!ghAccount) {
+      Alert.alert('No GitHub Account', 'Add a GitHub account in Settings first');
+      return;
+    }
+
+    setBuildStatus('Connecting to GitHub...');
     
     try {
-      // Connect GitHub
-      engine.connectGitHub(ghAccount.token, ghAccount.username);
+      projectEngine.connectGitHub(ghAccount.token, ghAccount.username);
       
-      // Create repo and push
       setBuildStatus('Creating repository...');
-      const repoFullName = await engine.createAndPush(repoName);
+      const repoFullName = await projectEngine.createAndPush(repoName);
       setLinkedRepo(repoFullName);
       
       addMessage({ 
         role: 'ai', 
-        content: `Repository created: ${repoFullName}\n\nStarting autonomous build with self-healing...` 
+        content: `✅ Repository created: github.com/${repoFullName}\n\n🚀 Starting autonomous build with ${selfHealingEnabled ? 'self-healing enabled' : 'self-healing disabled'}...` 
       });
+      scrollToBottom();
 
-      // Start autonomous build loop with self-healing
-      await engine.autonomousBuildLoop(
+      // Start build with self-healing
+      await projectEngine.autonomousBuild(
         (status) => {
           setBuildStatus(status);
-          addMessage({ role: 'ai', content: `[BUILD] ${status}` });
         },
-        (success) => {
-          if (success) {
-            setBuildStatus('BUILD SUCCESS!');
+        (result: BuildResult) => {
+          setBuildStatus('');
+          if (result.success) {
             addMessage({ 
               role: 'ai', 
-              content: `✅ BUILD SUCCESSFUL!\n\nDownload APK from:\nhttps://github.com/${repoFullName}/actions` 
+              content: `🎉 BUILD SUCCESSFUL!\n\n📦 Download APK from:\n${result.artifactUrl}\n\nGo to Actions → Artifacts → Download` 
             });
           } else {
-            setBuildStatus('Build failed after max retries');
             addMessage({ 
               role: 'ai', 
-              content: '❌ Build failed after 3 self-healing attempts. Check the error logs manually.' 
+              content: `❌ Build failed${selfHealingEnabled ? ' after self-healing attempts' : ''}.\n\nError: ${result.failedStep || 'Unknown'}\n\nLogs:\n${result.logs?.slice(0, 500) || 'No logs'}` 
             });
           }
+          scrollToBottom();
         }
       );
     } catch (e: any) {
-      setBuildStatus(`Error: ${e.message}`);
-      addMessage({ role: 'ai', content: `Error: ${e.message}` });
+      setBuildStatus('');
+      addMessage({ role: 'ai', content: `❌ Error: ${e.message}` });
+      scrollToBottom();
     }
-  }, [engine, ghAccount, setLinkedRepo, addMessage]);
+  }, [ghAccount, selfHealingEnabled, setLinkedRepo, addMessage, scrollToBottom]);
 
+  // Send message
   const send = async () => {
     if (!input.trim()) return;
     
@@ -86,65 +99,71 @@ export default function HomeScreen() {
     }
 
     addMessage({ role: 'user', content: input });
-    const text = input;
+    const userInput = input;
     setInput('');
     setIsProcessing(true);
+    scrollToBottom();
 
     try {
-      // Check if user wants full project generation
-      const isFullProject = text.toLowerCase().includes('app') || 
-                           text.toLowerCase().includes('build') ||
-                           text.toLowerCase().includes('create') ||
-                           text.toLowerCase().includes('बनाओ') ||
-                           text.toLowerCase().includes('banao');
+      // Check if user wants full project
+      const wantsProject = /app|build|create|बनाओ|banao|project/i.test(userInput);
 
       let res;
-      if (isFullProject) {
-        addMessage({ role: 'ai', content: '🚀 Generating complete project structure...' });
-        res = await generateFullProject(text);
+      if (wantsProject) {
+        addMessage({ role: 'ai', content: '🔧 Generating complete project structure with all files...' });
+        scrollToBottom();
+        res = await generateFullProject(userInput);
       } else {
-        res = await chatWithGemini(text);
+        res = await chatWithGemini(userInput);
       }
       
       if ((res.action === 'write_code' || res.action === 'fix_error') && res.files) {
-        // Create agentic engine with files
-        const projectName = text.split(' ').slice(0, 3).join('-').toLowerCase().replace(/[^a-z0-9-]/g, '');
-        const newEngine = createAgenticEngine(projectName || 'my-app', text);
-        newEngine.loadGeneratedFiles(res.files);
+        // Create engine with files
+        const projectName = userInput
+          .split(' ')
+          .slice(0, 3)
+          .join('-')
+          .toLowerCase()
+          .replace(/[^a-z0-9-]/g, '') || 'my-app';
+        
+        const newEngine = createAgenticEngine(projectName, userInput);
+        newEngine.loadFiles(res.files);
         setEngine(newEngine);
         
         const fileCount = Object.keys(res.files).length;
-        const fileList = Object.keys(res.files).slice(0, 10).join('\n• ');
+        const fileList = Object.keys(res.files).slice(0, 15).join('\n• ');
         
         addMessage({ 
           role: 'ai', 
-          content: `✅ Generated ${fileCount} files:\n\n• ${fileList}${fileCount > 10 ? `\n... and ${fileCount - 10} more` : ''}\n\n${res.plan || ''}\n\n${res.libraries?.length ? `Libraries: ${res.libraries.join(', ')}` : ''}\n\n${res.nativeModules?.length ? `Native Modules: ${res.nativeModules.join(', ')}` : ''}` 
+          content: `✅ Generated ${fileCount} files:\n\n• ${fileList}${fileCount > 15 ? `\n• ... and ${fileCount - 15} more` : ''}\n\n📋 Plan: ${res.plan || 'Project generated'}\n\n📦 Libraries: ${res.libraries?.join(', ') || 'None'}\n\n🔌 Native Modules: ${res.nativeModules?.join(', ') || 'None'}` 
         });
         
         setPendingFiles(res.files);
+        scrollToBottom();
 
-        // Auto-start build if GitHub connected
-        if (ghAccount) {
+        // Auto-start build if autonomous mode
+        if (autonomousMode && ghAccount) {
           Alert.alert(
-            'Start Autonomous Build?',
-            'Push to GitHub and start auto-build with self-healing?',
+            '🚀 Start Autonomous Build?',
+            'Create GitHub repo, push code, and auto-build APK with self-healing?',
             [
               { text: 'Later', style: 'cancel' },
               { 
                 text: 'Start Build', 
-                onPress: () => startAutonomousBuild(projectName || 'my-app')
+                onPress: () => startAutonomousBuild(newEngine, projectName)
               },
             ]
           );
         }
       } else {
         addMessage({ role: 'ai', content: res.message || 'Done!' });
+        scrollToBottom();
       }
     } catch (e: any) {
-      addMessage({ role: 'ai', content: `Error: ${e.message}` });
+      addMessage({ role: 'ai', content: `❌ Error: ${e.message}` });
+      scrollToBottom();
     } finally {
       setIsProcessing(false);
-      scrollRef.current?.scrollToEnd({ animated: true });
     }
   };
 
@@ -158,7 +177,9 @@ export default function HomeScreen() {
           </View>
           <View>
             <Text style={styles.title}>App Factory</Text>
-            <Text style={styles.subtitle}>{providerInfo?.name || 'Autonomous AI Builder'}</Text>
+            <Text style={styles.subtitle}>
+              {providerInfo?.name || 'Autonomous AI Builder'}
+            </Text>
           </View>
         </View>
         <View style={styles.headerRight}>
@@ -171,63 +192,72 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Build Status Banner */}
-      {buildStatus && (
+      {/* Build Status */}
+      {buildStatus ? (
         <View style={styles.buildBanner}>
           <ActivityIndicator size="small" color="#FFF" />
           <Text style={styles.buildText}>{buildStatus}</Text>
         </View>
-      )}
+      ) : null}
 
-      {linkedRepo && (
+      {/* Linked Repo */}
+      {linkedRepo ? (
         <View style={styles.repoBanner}>
           <Ionicons name="git-branch" size={14} color="#10B981" />
           <Text style={styles.repoText}>{linkedRepo}</Text>
         </View>
-      )}
+      ) : null}
 
-      {!hasKey && (
+      {/* No API Key Warning */}
+      {!hasKey ? (
         <TouchableOpacity style={styles.warning} onPress={() => router.push('/settings')}>
-          <Text style={styles.warningText}>Tap to add API Key</Text>
+          <Ionicons name="warning" size={16} color="#FCD34D" />
+          <Text style={styles.warningText}>No API Key - Tap to configure</Text>
         </TouchableOpacity>
-      )}
+      ) : null}
 
-      {/* Chat */}
+      {/* Chat Area */}
       <ScrollView 
         ref={scrollRef} 
         style={styles.chat}
         contentContainerStyle={styles.chatContent}
       >
-        {messages.length === 0 && (
+        {messages.length === 0 ? (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="rocket" size={40} color="#A78BFA" />
+              <Ionicons name="rocket" size={44} color="#A78BFA" />
             </View>
             <Text style={styles.emptyTitle}>Autonomous App Builder</Text>
             <Text style={styles.emptyText}>
-              I generate complete projects, push to GitHub, auto-build APK, and self-heal on errors.
-              {"\n\n"}Try: "Build a floating scoreboard app"
+              Generate complete projects, auto-push to GitHub, build APK, and self-heal on errors.
             </Text>
+            
             <View style={styles.features}>
-              <View style={styles.featureItem}>
-                <Ionicons name="folder-open" size={16} color="#A78BFA" />
-                <Text style={styles.featureText}>Multi-File Project Structure</Text>
+              <View style={styles.featureRow}>
+                <View style={styles.feature}>
+                  <Ionicons name="folder-open" size={18} color="#A78BFA" />
+                  <Text style={styles.featureText}>Multi-File Projects</Text>
+                </View>
+                <View style={styles.feature}>
+                  <Ionicons name="git-branch" size={18} color="#10B981" />
+                  <Text style={styles.featureText}>GitHub Auto-Push</Text>
+                </View>
               </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="git-branch" size={16} color="#10B981" />
-                <Text style={styles.featureText}>GitHub Auto-Push</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="build" size={16} color="#F59E0B" />
-                <Text style={styles.featureText}>Self-Healing Builds</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="phone-portrait" size={16} color="#EF4444" />
-                <Text style={styles.featureText}>Native Module Support</Text>
+              <View style={styles.featureRow}>
+                <View style={styles.feature}>
+                  <Ionicons name="build" size={18} color="#F59E0B" />
+                  <Text style={styles.featureText}>Self-Healing Builds</Text>
+                </View>
+                <View style={styles.feature}>
+                  <Ionicons name="phone-portrait" size={18} color="#EF4444" />
+                  <Text style={styles.featureText}>Native Modules</Text>
+                </View>
               </View>
             </View>
+
+            <Text style={styles.tryText}>Try: "Build a todo app with notifications"</Text>
           </View>
-        )}
+        ) : null}
 
         {messages.map((msg, i) => (
           <View key={i} style={[styles.bubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
@@ -239,30 +269,35 @@ export default function HomeScreen() {
           </View>
         ))}
 
-        {isProcessing && (
+        {isProcessing ? (
           <View style={styles.loading}>
             <ActivityIndicator color="#A78BFA" />
-            <Text style={styles.loadingText}>Generating project...</Text>
+            <Text style={styles.loadingText}>Generating complete project structure...</Text>
           </View>
-        )}
+        ) : null}
       </ScrollView>
 
       {/* Input */}
       <View style={styles.inputBox}>
         <TextInput
           style={styles.input}
-          placeholder="Describe your app... (e.g., 'Build a todo app with dark mode')"
+          placeholder="Describe your app idea..."
           placeholderTextColor="#6B7280"
           value={input}
           onChangeText={setInput}
           multiline
+          maxLength={2000}
         />
         <TouchableOpacity 
           style={[styles.sendBtn, (!input.trim() || isProcessing) && styles.sendDisabled]} 
           onPress={send}
           disabled={!input.trim() || isProcessing}
         >
-          <Ionicons name="send" size={20} color="#000" />
+          {isProcessing ? (
+            <ActivityIndicator color="#0A0A0F" size="small" />
+          ) : (
+            <Ionicons name="send" size={20} color="#0A0A0F" />
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -278,28 +313,30 @@ const styles = StyleSheet.create({
   subtitle: { color: '#A78BFA', fontSize: 12, fontWeight: '600' },
   headerRight: { flexDirection: 'row', gap: 8 },
   iconBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#1F1F2E', alignItems: 'center', justifyContent: 'center' },
-  buildBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, backgroundColor: '#7C3AED', gap: 8 },
+  buildBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12, backgroundColor: '#7C3AED', gap: 10 },
   buildText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
   repoBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 8, backgroundColor: '#064E3B', gap: 6 },
   repoText: { color: '#10B981', fontSize: 12, fontWeight: '600' },
-  warning: { padding: 10, backgroundColor: '#78350F', alignItems: 'center' },
+  warning: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, backgroundColor: '#78350F', gap: 8 },
   warningText: { color: '#FCD34D', fontSize: 13, fontWeight: '600' },
   chat: { flex: 1 },
   chatContent: { padding: 16, paddingBottom: 100 },
   empty: { alignItems: 'center', paddingVertical: 40 },
-  emptyIcon: { width: 80, height: 80, borderRadius: 24, backgroundColor: '#1F1F2E', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+  emptyIcon: { width: 88, height: 88, borderRadius: 24, backgroundColor: '#1F1F2E', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   emptyTitle: { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 8 },
-  emptyText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', paddingHorizontal: 24, lineHeight: 22, marginBottom: 24 },
-  features: { gap: 10, width: '100%', paddingHorizontal: 20 },
-  featureItem: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1F1F2E', padding: 12, borderRadius: 10 },
-  featureText: { color: '#D1D5DB', fontSize: 14 },
+  emptyText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', paddingHorizontal: 20, lineHeight: 22, marginBottom: 24 },
+  features: { gap: 10, marginBottom: 20 },
+  featureRow: { flexDirection: 'row', gap: 10 },
+  feature: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1F1F2E', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, flex: 1 },
+  featureText: { color: '#D1D5DB', fontSize: 12 },
+  tryText: { color: '#6B7280', fontSize: 13, fontStyle: 'italic' },
   bubble: { padding: 14, borderRadius: 16, marginBottom: 12, maxWidth: '92%' },
   userBubble: { backgroundColor: '#3B2D5B', alignSelf: 'flex-end' },
   aiBubble: { backgroundColor: '#1F1F2E', alignSelf: 'flex-start', borderWidth: 1, borderColor: '#2D2D3D' },
   bubbleHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 },
   roleText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
-  msgText: { color: '#E5E7EB', fontSize: 15, lineHeight: 22 },
-  loading: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 10 },
+  msgText: { color: '#E5E7EB', fontSize: 14, lineHeight: 22 },
+  loading: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
   loadingText: { color: '#9CA3AF', fontSize: 14 },
   inputBox: { flexDirection: 'row', padding: 12, backgroundColor: '#12121A', borderTopWidth: 1, borderTopColor: '#1F1F2E', gap: 10, alignItems: 'flex-end' },
   input: { flex: 1, backgroundColor: '#1F1F2E', color: '#FFF', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, maxHeight: 100, fontSize: 15 },
