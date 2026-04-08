@@ -26,7 +26,8 @@ export default function HomeScreen() {
   const { 
     messages, addMessage, isProcessing, setIsProcessing, 
     setPendingFiles, linkedRepo, setLinkedRepo,
-    autonomousMode, selfHealingEnabled 
+    autonomousMode, selfHealingEnabled,
+    addProject
   } = useStore();
   
   const hasKey = isAIConfigured();
@@ -139,6 +140,17 @@ export default function HomeScreen() {
         });
         
         setPendingFiles(res.files);
+        
+        // Save as project
+        addProject({
+          name: projectName,
+          description: userInput,
+          files: res.files,
+          repo: null,
+          buildStatus: 'idle',
+          lastBuildLog: '',
+        });
+        
         scrollToBottom();
 
         // Auto-start build if autonomous mode

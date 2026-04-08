@@ -36,6 +36,18 @@ export interface Message {
   timestamp: string;
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  files: Record<string, string>;
+  repo: string | null;
+  buildStatus: 'idle' | 'building' | 'success' | 'failed';
+  lastBuildLog: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface AppState {
   // AI Providers (Gemini, Groq, DeepSeek, HuggingFace, OpenRouter)
   aiProviders: APIProvider[];
@@ -65,6 +77,13 @@ interface AppState {
   messages: Message[];
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => void;
   clearMessages: () => void;
+  
+  // Projects
+  projects: Project[];
+  addProject: (p: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>) => string;
+  updateProject: (id: string, updates: Partial<Project>) => void;
+  removeProject: (id: string) => void;
+  getProject: (id: string) => Project | undefined;
   
   // Project State
   isProcessing: boolean;
@@ -180,6 +199,32 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
   clearMessages: () => set({ messages: [] }),
+  
+  // Projects
+  projects: [],
+  addProject: (p) => {
+    const id = genId();
+    const now = new Date().toISOString();
+    set((s) => ({
+      projects: [...s.projects, { ...p, id, createdAt: now, updatedAt: now }],
+    }));
+    return id;
+  },
+  updateProject: (id, updates) => {
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p
+      ),
+    }));
+  },
+  removeProject: (id) => {
+    set((s) => ({
+      projects: s.projects.filter((p) => p.id !== id),
+    }));
+  },
+  getProject: (id) => {
+    return get().projects.find((p) => p.id === id);
+  },
   
   // Project
   isProcessing: false,

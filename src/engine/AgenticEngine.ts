@@ -202,13 +202,38 @@ export class GitHubAutonomousService {
     let failedStep = '';
     
     for (const job of jobs) {
+      logs += `\n=== JOB: ${job.name} (${job.conclusion || job.status}) ===\n`;
+      
+      for (const step of job.steps || []) {
+        const icon = step.conclusion === 'success' ? 'OK' : step.conclusion === 'failure' ? 'FAIL' : 'SKIP';
+        logs += `  [${icon}] ${step.name}\n`;
+        
+        if (step.conclusion === 'failure') {
+          failedStep = step.name;
+          logs += `  >>> FAILED STEP: ${step.name} <<<\n`;
+        }
+      }
+    }
+
+    // Try to fetch detailed logs for the failed job
+    for (const job of jobs) {
       if (job.conclusion === 'failure') {
-        logs += `\n=== JOB FAILED: ${job.name} ===\n`;
-        for (const step of job.steps || []) {
-          if (step.conclusion === 'failure') {
-            failedStep = step.name;
-            logs += `\n❌ STEP FAILED: ${step.name}\n`;
+        try {
+          const logRes = await fetch(`${this.baseUrl}/repos/${repoFullName}/actions/jobs/${job.id}/logs`, {
+            headers: {
+              'Authorization': `Bearer ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+            },
+          });
+          
+          if (logRes.ok) {
+            const logText = await logRes.text();
+            // Extract last 3000 chars of the actual error log
+            const errorSection = logText.slice(-3000);
+            logs += `\n=== DETAILED ERROR LOG (${job.name}) ===\n${errorSection}\n`;
           }
+        } catch {
+          // Log fetching failed, continue with basic info
         }
       }
     }
@@ -497,6 +522,24 @@ export class AgenticEngine {
     onComplete({ success: false, runId: 0, logs: 'Max retries exceeded' });
   }
 
+  /**
+   * Re-trigger workflow (for self-healing after fix)
+   */
+  async retriggerBuild(repoFullName: string): Promise<boolean> {
+    if (!this.githubService) return false;
+    try {
+      // Pushing updated files will auto-trigger the workflow
+      await this.githubService.pushFiles(
+        repoFullName,
+        this.fileManager.getAllFiles(),
+        'Auto-fix: Self-healing code update'
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // ===========================================
   // AUTO-FIX METHODS
   // ===========================================
@@ -558,18 +601,57 @@ Return ONLY the fixed files in JSON:
     if (!provider) return false;
 
     try {
-      const prompt = `Fix this React Native build error:
+      // Get full file context
+      const fileContext = this.fileManager.getContextSummary();
+      const fileTree = this.fileManager.getFileTree();
+      
+      // Extract key error patterns from logs
+      const errorPatterns = this.extractErrorPatterns(errorLogs);
+      
+      // Determine which files need fixing based on error
+      const relevantFiles: Record<string, string> = {};
+      for (const filePath of fileTree) {
+        const content = this.fileManager.getFile(filePath);
+        if (content) {
+          // Include files mentioned in errors, or key config files
+          const isRelevant = errorPatterns.some(p => filePath.includes(p) || content.includes(p))
+            || filePath === 'app.json'
+            || filePath === 'package.json'
+            || filePath.endsWith('_layout.tsx')
+            || filePath.includes('build.yml');
+          
+          if (isRelevant) {
+            relevantFiles[filePath] = content;
+          }
+        }
+      }
+
+      const prompt = `You are an expert React Native / Expo build debugger. Fix this build error.
 
 ERROR LOGS:
 \`\`\`
-${errorLogs.slice(0, 3000)}
+${errorLogs.slice(0, 4000)}
 \`\`\`
 
-CURRENT FILES:
-${this.fileManager.getContextSummary()}
+ERROR PATTERNS DETECTED:
+${errorPatterns.join('\n')}
 
-Return ONLY the fixed files in JSON:
-{"files":{"path/file.tsx":"// complete fixed content"}}`;
+RELEVANT FILES IN PROJECT:
+${Object.entries(relevantFiles).map(([p, c]) => `--- ${p} ---\n${c.slice(0, 2000)}`).join('\n\n')}
+
+ALL PROJECT FILES:
+${fileTree.join('\n')}
+
+NATIVE MODULES: ${this.fileManager.getNativeModules().join(', ') || 'None'}
+DEPENDENCIES: ${this.fileManager.getDependencies().join(', ') || 'Standard'}
+
+Instructions:
+1. Identify the ROOT CAUSE from the error logs
+2. Provide the EXACT fix with complete file content
+3. Return ONLY valid JSON
+
+Return format:
+{"files":{"path/file.tsx":"// complete fixed content"}, "explanation": "what was wrong and what was fixed"}`;
 
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${provider.apiKey}`,
@@ -578,7 +660,7 @@ Return ONLY the fixed files in JSON:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+            generationConfig: { temperature: 0.1, maxOutputTokens: 16384 },
           }),
         }
       );
@@ -594,7 +676,7 @@ Return ONLY the fixed files in JSON:
 
       const fix = JSON.parse(jsonMatch[0]);
       
-      if (fix.files) {
+      if (fix.files && Object.keys(fix.files).length > 0) {
         for (const [path, content] of Object.entries(fix.files)) {
           this.fileManager.setFile(path, content as string);
         }
@@ -605,6 +687,41 @@ Return ONLY the fixed files in JSON:
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Extract meaningful error patterns from build logs
+   */
+  private extractErrorPatterns(logs: string): string[] {
+    const patterns: string[] = [];
+    
+    // Common error patterns
+    const matchers = [
+      /error:\s*(.+)/gi,
+      /FAILURE:\s*(.+)/gi,
+      /Cannot find module '([^']+)'/gi,
+      /Module not found:\s*(.+)/gi,
+      /Could not resolve '([^']+)'/gi,
+      /undefined is not an object/gi,
+      /SyntaxError:\s*(.+)/gi,
+      /TypeError:\s*(.+)/gi,
+      /Task :app:(\w+) FAILED/gi,
+      /Execution failed for task ':app:(\w+)'/gi,
+      /error TS\d+:\s*(.+)/gi,
+    ];
+
+    for (const matcher of matchers) {
+      let match;
+      while ((match = matcher.exec(logs)) !== null) {
+        const errorText = match[1] || match[0];
+        if (errorText.length < 200) {
+          patterns.push(errorText.trim());
+        }
+      }
+    }
+
+    // Remove duplicates
+    return [...new Set(patterns)].slice(0, 15);
   }
 
   // ===========================================
