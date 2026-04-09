@@ -22,12 +22,20 @@ import { useStore, getDefaultGitHubAccount } from '../src/store/useStore';
 let _chatWithGemini: any = null;
 let _generateFullProject: any = null;
 let _createAgenticEngine: any = null;
+let _analyzeScreenshot: any = null;
+let _analyzeVideo: any = null;
+let _analyzeVoice: any = null;
+let _analyzeWithMedia: any = null;
 
 const loadAIModules = async () => {
   if (!_chatWithGemini) {
     const gemini = require('../src/api/geminiApi');
     _chatWithGemini = gemini.chatWithGemini;
     _generateFullProject = gemini.generateFullProject;
+    _analyzeScreenshot = gemini.analyzeScreenshot;
+    _analyzeVideo = gemini.analyzeVideo;
+    _analyzeVoice = gemini.analyzeVoice;
+    _analyzeWithMedia = gemini.analyzeWithMedia;
   }
 };
 
@@ -55,6 +63,9 @@ export default function HomeScreen() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [userRepos, setUserRepos] = useState<Array<{ name: string; fullName: string; description: string }>>([]);
+  const [showMediaMenu, setShowMediaMenu] = useState(false);
+  const [attachedMedia, setAttachedMedia] = useState<{ type: string; uri: string; base64?: string; mimeType?: string } | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   
   const hasKey = useStore.getState().aiProviders.length > 0;
   const activeProvider = useStore.getState().aiProviders.find(
@@ -136,6 +147,154 @@ export default function HomeScreen() {
       scrollToBottom();
     }
   }, [ghAccount, setPendingFiles, setLinkedRepo, addProject, addMessage, scrollToBottom]);
+
+  // Pick media for analysis
+  const pickMedia = useCallback(async (type: 'image' | 'video' | 'audio') => {
+    setShowMediaMenu(false);
+    
+    try {
+      const MediaService = require('../src/services/MediaService');
+      let media;
+      
+      switch (type) {
+        case 'image':
+          media = await MediaService.pickImage();
+          break;
+        case 'video':
+          media = await MediaService.pickVideo();
+          break;
+        case 'audio':
+          media = await MediaService.pickAudio();
+          break;
+      }
+      
+      if (media) {
+        setAttachedMedia({
+          type: media.type,
+          uri: media.uri,
+          base64: media.base64,
+          mimeType: media.mimeType,
+        });
+        addMessage({ 
+          role: 'ai', 
+          content: `${type === 'image' ? 'Screenshot' : type === 'video' ? 'Video' : 'Audio'} attached! Ab batao kya analyze karna hai ya message type karo.` 
+        });
+        scrollToBottom();
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    }
+  }, [addMessage, scrollToBottom]);
+
+  // Take photo for analysis
+  const takePhoto = useCallback(async () => {
+    setShowMediaMenu(false);
+    
+    try {
+      const MediaService = require('../src/services/MediaService');
+      const media = await MediaService.takePhoto();
+      
+      if (media) {
+        setAttachedMedia({
+          type: 'image',
+          uri: media.uri,
+          base64: media.base64,
+          mimeType: 'image/jpeg',
+        });
+        addMessage({ 
+          role: 'ai', 
+          content: `Photo capture ho gayi! Ab batao kya analyze karna hai.` 
+        });
+        scrollToBottom();
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    }
+  }, [addMessage, scrollToBottom]);
+
+  // Export project to storage
+  const exportProject = useCallback(async () => {
+    if (!hasPendingFiles) {
+      Alert.alert('No Project', 'Pehle project generate karo');
+      return;
+    }
+    
+    const projectName = useStore.getState().projects.slice(-1)[0]?.name || 'my-app';
+    setBuildStatus('Exporting project...');
+    
+    try {
+      const MediaService = require('../src/services/MediaService');
+      const result = await MediaService.exportProjectToStorage(projectName, pendingFiles!);
+      
+      setBuildStatus('');
+      if (result.success) {
+        addMessage({ 
+          role: 'ai', 
+          content: `Project export ho gaya!\n\nPath: ${result.path}\n\n${Object.keys(pendingFiles!).length} files save ho gayi.` 
+        });
+      } else {
+        addMessage({ role: 'ai', content: `Export failed: ${result.error}` });
+      }
+      scrollToBottom();
+    } catch (e: any) {
+      setBuildStatus('');
+      Alert.alert('Error', e.message);
+    }
+  }, [hasPendingFiles, pendingFiles, addMessage, scrollToBottom]);
+
+  // Download APK
+  const downloadAPK = useCallback(async () => {
+    if (!linkedRepo || !ghAccount) {
+      Alert.alert('No Build', 'Pehle GitHub pe push karo aur build complete hone do');
+      return;
+    }
+    
+    setBuildStatus('Getting build info...');
+    
+    try {
+      const { GitHubAutonomousService } = require('../src/engine/AgenticEngine');
+      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      
+      const runs = await service.getWorkflowRuns(linkedRepo);
+      const successfulRun = runs.find((r: any) => r.conclusion === 'success');
+      
+      if (!successfulRun) {
+        setBuildStatus('');
+        addMessage({ role: 'ai', content: 'Koi successful build nahi mila. Build complete hone ka wait karo ya GitHub Actions check karo.' });
+        scrollToBottom();
+        return;
+      }
+      
+      setBuildStatus('Downloading APK...');
+      setDownloadProgress(0);
+      
+      const MediaService = require('../src/services/MediaService');
+      const result = await MediaService.downloadAPKFromGitHub(
+        ghAccount.token,
+        linkedRepo,
+        successfulRun.id,
+        (progress: number) => setDownloadProgress(progress)
+      );
+      
+      setDownloadProgress(null);
+      setBuildStatus('');
+      
+      if (result.success) {
+        addMessage({ 
+          role: 'ai', 
+          content: `APK download ho gaya!\n\nPath: ${result.path}\n\nNote: Downloaded file ek ZIP hai jisme APK hai. File manager se extract karo.` 
+        });
+      } else {
+        addMessage({ role: 'ai', content: `Download failed: ${result.error}` });
+      }
+      scrollToBottom();
+    } catch (e: any) {
+      setDownloadProgress(null);
+      setBuildStatus('');
+      addMessage({ role: 'ai', content: `Error: ${e.message}` });
+      scrollToBottom();
+    }
+  }, [linkedRepo, ghAccount, addMessage, scrollToBottom]);
 
   // Push to GitHub
   const pushToGitHub = useCallback(async () => {
@@ -233,7 +392,7 @@ export default function HomeScreen() {
 
   // Send message with full conversation context
   const send = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && !attachedMedia) return;
     
     if (!hasKey) {
       Alert.alert('No API Key', 'Settings mein AI provider key add karo');
@@ -242,9 +401,12 @@ export default function HomeScreen() {
     }
 
     Keyboard.dismiss();
-    addMessage({ role: 'user', content: input });
-    const userInput = input;
+    const userInput = input.trim();
+    const media = attachedMedia;
+    
+    addMessage({ role: 'user', content: userInput || (media ? `[${media.type} attached for analysis]` : '') });
     setInput('');
+    setAttachedMedia(null);
     setIsProcessing(true);
     setShowActions(false);
     scrollToBottom();
@@ -252,31 +414,62 @@ export default function HomeScreen() {
     try {
       await loadAIModules();
       
-      // Build chat history for context
-      const chatHistory = useStore.getState().messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
-
-      // Check if first-time project request
-      const isFirstProjectRequest = !hasPendingFiles && 
-        /app|build|create|बनाओ|banao|project|calculator|todo|game|chat/i.test(userInput);
-
       let res;
-      if (isFirstProjectRequest) {
-        addMessage({ role: 'ai', content: 'Complete project generate ho raha hai...' });
+      
+      // Handle media analysis
+      if (media && media.base64) {
+        addMessage({ role: 'ai', content: `${media.type === 'image' ? 'Screenshot' : media.type === 'video' ? 'Video' : 'Audio'} analyze ho raha hai...` });
         scrollToBottom();
-        res = await _generateFullProject(userInput);
+        
+        if (media.type === 'image') {
+          res = userInput 
+            ? await _analyzeWithMedia(userInput, { type: 'image', data: media.base64, mimeType: media.mimeType || 'image/jpeg' })
+            : await _analyzeScreenshot(media.base64);
+        } else if (media.type === 'video') {
+          res = await _analyzeVideo(media.base64, media.mimeType || 'video/mp4', userInput);
+        } else if (media.type === 'audio') {
+          res = await _analyzeVoice(media.base64, media.mimeType || 'audio/mpeg', userInput);
+        }
       } else {
-        // Send with full context - chat history + pending files
-        res = await _chatWithGemini(userInput, {
-          chatHistory,
-          existingFiles: pendingFiles || undefined,
-          hasPendingFiles: !!hasPendingFiles,
-        });
+        // Normal text processing
+        const chatHistory = useStore.getState().messages.map(m => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+        const isFirstProjectRequest = !hasPendingFiles && 
+          /app|build|create|बनाओ|banao|project|calculator|todo|game|chat/i.test(userInput);
+
+        if (isFirstProjectRequest) {
+          addMessage({ role: 'ai', content: 'Complete project generate ho raha hai...' });
+          scrollToBottom();
+          res = await _generateFullProject(userInput);
+        } else {
+          res = await _chatWithGemini(userInput, {
+            chatHistory,
+            existingFiles: pendingFiles || undefined,
+            hasPendingFiles: !!hasPendingFiles,
+          });
+        }
       }
       
-      if ((res.action === 'write_code' || res.action === 'fix_error') && res.files) {
+      // Handle response
+      if (res?.action === 'analyze' && res.issues) {
+        // Analysis result
+        const issueList = res.issues.join('\n- ');
+        addMessage({ 
+          role: 'ai', 
+          content: `**Analysis Result:**\n\nIssues found:\n- ${issueList}\n\nSeverity: ${res.severity || 'medium'}\n\n${res.message || ''}` 
+        });
+        
+        // If fixes provided, apply them
+        if (res.files && Object.keys(res.files).length > 0) {
+          const mergedFiles = { ...pendingFiles, ...res.files };
+          setPendingFiles(mergedFiles);
+          addMessage({ role: 'ai', content: `${Object.keys(res.files).length} files fix ho gayi. Push ya review karo.` });
+          setShowActions(true);
+        }
+      } else if ((res?.action === 'write_code' || res?.action === 'fix_error') && res.files) {
         const projectName = userInput
           .split(' ')
           .slice(0, 3)
@@ -292,22 +485,29 @@ export default function HomeScreen() {
           content: `${fileCount} files generate ho gayi:\n\n- ${fileList}${fileCount > 12 ? `\n- ... aur ${fileCount - 12} more` : ''}\n\nPlan: ${res.plan || 'Project ready'}\n\nLibraries: ${res.libraries?.join(', ') || 'Standard'}` 
         });
         
-        setPendingFiles(res.files);
+        const mergedFiles = hasPendingFiles ? { ...pendingFiles, ...res.files } : res.files;
+        setPendingFiles(mergedFiles);
         
-        addProject({
-          name: projectName,
-          description: userInput,
-          files: res.files,
-          repo: null,
-          buildStatus: 'idle',
-          lastBuildLog: '',
-        });
+        if (!hasPendingFiles) {
+          addProject({
+            name: projectName,
+            description: userInput,
+            files: mergedFiles,
+            repo: null,
+            buildStatus: 'idle',
+            lastBuildLog: '',
+          });
+        }
         
-        // Show action buttons
         setShowActions(true);
         scrollToBottom();
       } else {
-        addMessage({ role: 'ai', content: res.message || 'Done!' });
+        // Voice transcription or message
+        let msg = res?.message || 'Done!';
+        if (res?.transcription) {
+          msg = `**Transcription:** ${res.transcription}\n\n${msg}`;
+        }
+        addMessage({ role: 'ai', content: msg });
         scrollToBottom();
       }
     } catch (e: any) {
@@ -493,11 +693,45 @@ export default function HomeScreen() {
           ) : null}
         </ScrollView>
 
+        {/* Attached Media Preview */}
+        {attachedMedia ? (
+          <View style={styles.attachedPreview}>
+            <Ionicons 
+              name={attachedMedia.type === 'image' ? 'image' : attachedMedia.type === 'video' ? 'videocam' : 'mic'} 
+              size={18} 
+              color="#A78BFA" 
+            />
+            <Text style={styles.attachedText}>
+              {attachedMedia.type === 'image' ? 'Screenshot' : attachedMedia.type === 'video' ? 'Video' : 'Audio'} attached
+            </Text>
+            <TouchableOpacity onPress={() => setAttachedMedia(null)}>
+              <Ionicons name="close-circle" size={20} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {/* Download Progress */}
+        {downloadProgress !== null ? (
+          <View style={styles.progressBar}>
+            <View style={[styles.progressFill, { width: `${downloadProgress}%` }]} />
+            <Text style={styles.progressText}>{downloadProgress}%</Text>
+          </View>
+        ) : null}
+
         {/* Input */}
         <View style={styles.inputBox}>
+          {/* Media Button */}
+          <TouchableOpacity 
+            style={styles.mediaBtn}
+            onPress={() => setShowMediaMenu(true)}
+            data-testid="media-btn"
+          >
+            <Ionicons name="attach" size={24} color="#A78BFA" />
+          </TouchableOpacity>
+          
           <TextInput
             style={styles.input}
-            placeholder={hasPendingFiles ? "Kuch aur karna hai? Batao..." : "App idea describe karo..."}
+            placeholder={attachedMedia ? "Describe kya analyze karna hai..." : hasPendingFiles ? "Kuch aur karna hai? Batao..." : "App idea describe karo..."}
             placeholderTextColor="#6B7280"
             value={input}
             onChangeText={setInput}
@@ -507,9 +741,9 @@ export default function HomeScreen() {
             data-testid="chat-input"
           />
           <TouchableOpacity 
-            style={[styles.sendBtn, (!input.trim() || isProcessing) && styles.sendDisabled]} 
+            style={[styles.sendBtn, (!input.trim() && !attachedMedia || isProcessing) && styles.sendDisabled]} 
             onPress={send}
-            disabled={!input.trim() || isProcessing}
+            disabled={(!input.trim() && !attachedMedia) || isProcessing}
             data-testid="send-btn"
           >
             {isProcessing ? (
@@ -520,6 +754,86 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Media Menu Modal */}
+      <Modal
+        visible={showMediaMenu}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowMediaMenu(false)}
+      >
+        <TouchableOpacity 
+          style={styles.mediaMenuOverlay} 
+          activeOpacity={1} 
+          onPress={() => setShowMediaMenu(false)}
+        >
+          <View style={styles.mediaMenu}>
+            <Text style={styles.mediaMenuTitle}>Media Attach karo</Text>
+            
+            <TouchableOpacity style={styles.mediaMenuItem} onPress={() => pickMedia('image')} data-testid="pick-image">
+              <View style={[styles.mediaIcon, { backgroundColor: '#7C3AED20' }]}>
+                <Ionicons name="image" size={24} color="#7C3AED" />
+              </View>
+              <View>
+                <Text style={styles.mediaItemTitle}>Screenshot</Text>
+                <Text style={styles.mediaItemDesc}>Gallery se photo select karo</Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.mediaMenuItem} onPress={takePhoto} data-testid="take-photo">
+              <View style={[styles.mediaIcon, { backgroundColor: '#10B98120' }]}>
+                <Ionicons name="camera" size={24} color="#10B981" />
+              </View>
+              <View>
+                <Text style={styles.mediaItemTitle}>Camera</Text>
+                <Text style={styles.mediaItemDesc}>Live photo capture karo</Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.mediaMenuItem} onPress={() => pickMedia('video')} data-testid="pick-video">
+              <View style={[styles.mediaIcon, { backgroundColor: '#F59E0B20' }]}>
+                <Ionicons name="videocam" size={24} color="#F59E0B" />
+              </View>
+              <View>
+                <Text style={styles.mediaItemTitle}>Video</Text>
+                <Text style={styles.mediaItemDesc}>Bug recording ya screen recording</Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.mediaMenuItem} onPress={() => pickMedia('audio')} data-testid="pick-audio">
+              <View style={[styles.mediaIcon, { backgroundColor: '#EF444420' }]}>
+                <Ionicons name="mic" size={24} color="#EF4444" />
+              </View>
+              <View>
+                <Text style={styles.mediaItemTitle}>Voice</Text>
+                <Text style={styles.mediaItemDesc}>Voice command ya recording</Text>
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.menuDivider} />
+            
+            <TouchableOpacity style={styles.mediaMenuItem} onPress={exportProject} data-testid="export-project">
+              <View style={[styles.mediaIcon, { backgroundColor: '#2563EB20' }]}>
+                <Ionicons name="folder-open" size={24} color="#2563EB" />
+              </View>
+              <View>
+                <Text style={styles.mediaItemTitle}>Export Project</Text>
+                <Text style={styles.mediaItemDesc}>Storage mein save karo</Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.mediaMenuItem} onPress={downloadAPK} data-testid="download-apk">
+              <View style={[styles.mediaIcon, { backgroundColor: '#059669' }]}>
+                <Ionicons name="download" size={24} color="#FFF" />
+              </View>
+              <View>
+                <Text style={styles.mediaItemTitle}>Download APK</Text>
+                <Text style={styles.mediaItemDesc}>GitHub se APK download karo</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Import Modal */}
       <Modal
@@ -616,11 +930,28 @@ const styles = StyleSheet.create({
   actionBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
   // Input
   inputBox: { flexDirection: 'row', padding: 10, backgroundColor: '#12121A', borderTopWidth: 1, borderTopColor: '#1F1F2E', gap: 8, alignItems: 'flex-end' },
+  mediaBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1F1F2E', alignItems: 'center', justifyContent: 'center' },
   input: { flex: 1, backgroundColor: '#1F1F2E', color: '#FFF', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 80, fontSize: 14 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#A78BFA', alignItems: 'center', justifyContent: 'center' },
   sendDisabled: { opacity: 0.5 },
+  // Attached Media Preview
+  attachedPreview: { flexDirection: 'row', alignItems: 'center', padding: 10, backgroundColor: '#1F1F2E', gap: 8, marginHorizontal: 10, marginBottom: 0, borderRadius: 10 },
+  attachedText: { flex: 1, color: '#A78BFA', fontSize: 12 },
+  // Progress Bar
+  progressBar: { height: 24, backgroundColor: '#1F1F2E', marginHorizontal: 10, borderRadius: 12, overflow: 'hidden', justifyContent: 'center' },
+  progressFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#7C3AED', borderRadius: 12 },
+  progressText: { color: '#FFF', fontSize: 11, textAlign: 'center', fontWeight: '600' },
+  // Media Menu Modal
+  mediaMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  mediaMenu: { backgroundColor: '#12121A', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 },
+  mediaMenuTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' },
+  mediaMenuItem: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 14 },
+  mediaIcon: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  mediaItemTitle: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  mediaItemDesc: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  menuDivider: { height: 1, backgroundColor: '#1F1F2E', marginVertical: 10 },
   // Modal styles
-  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center' },
   modal: { width: '90%', maxHeight: '70%', backgroundColor: '#12121A', borderRadius: 16, borderWidth: 1, borderColor: '#A78BFA40' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1F1F2E' },
   modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },

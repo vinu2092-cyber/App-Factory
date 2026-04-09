@@ -410,3 +410,325 @@ export async function autoFixBuildError(errorLogs: string): Promise<AIResponse> 
 export async function addNativeModule(moduleType: string, projectFiles: Record<string, string>): Promise<AIResponse> {
   return chatWithGemini(`Add ${moduleType} native module to this project. Update necessary files including app.json, package.json, and create any required native code.`, { existingFiles: projectFiles });
 }
+
+// ===========================================
+// MEDIA ANALYSIS FOR DEBUGGING
+// ===========================================
+
+/**
+ * Analyze screenshot for UI bugs/errors
+ */
+export async function analyzeScreenshot(
+  base64Image: string,
+  context?: string
+): Promise<AIResponse> {
+  const provider = getActiveAIProvider();
+  if (!provider) {
+    throw new Error('No API key configured. Add one in Settings.');
+  }
+
+  // Only Gemini supports vision natively
+  if (provider.type !== 'gemini') {
+    return {
+      action: 'message',
+      message: 'Screenshot analysis requires Gemini API. Please add a Gemini API key in Settings.',
+    };
+  }
+
+  const url = `${API_ENDPOINTS.gemini}?key=${provider.apiKey}`;
+  
+  const prompt = `You are an expert React Native debugger. Analyze this screenshot and identify:
+1. Any UI bugs or visual issues
+2. Error messages visible on screen
+3. Crash screens or error boundaries
+4. Layout problems or broken UI
+5. Performance indicators (loading states stuck, etc.)
+
+${context ? `Additional context: ${context}` : ''}
+
+Return JSON format:
+{
+  "action": "analyze",
+  "issues": ["issue1", "issue2"],
+  "severity": "high|medium|low",
+  "message": "Detailed analysis and recommendations",
+  "files": { "path/file.tsx": "// Fixed code if applicable" }
+}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            {
+              inline_data: {
+                mime_type: 'image/jpeg',
+                data: base64Image,
+              },
+            },
+          ],
+        }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || 'Vision API Error');
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {
+        return { action: 'message', message: text };
+      }
+    }
+    return { action: 'message', message: text };
+  } catch (e: any) {
+    throw new Error(e.message || 'Screenshot analysis failed');
+  }
+}
+
+/**
+ * Analyze video for bug reproduction
+ */
+export async function analyzeVideo(
+  base64Video: string,
+  mimeType: string = 'video/mp4',
+  context?: string
+): Promise<AIResponse> {
+  const provider = getActiveAIProvider();
+  if (!provider) {
+    throw new Error('No API key configured. Add one in Settings.');
+  }
+
+  if (provider.type !== 'gemini') {
+    return {
+      action: 'message',
+      message: 'Video analysis requires Gemini API. Please add a Gemini API key in Settings.',
+    };
+  }
+
+  const url = `${API_ENDPOINTS.gemini}?key=${provider.apiKey}`;
+  
+  const prompt = `You are an expert React Native debugger. Analyze this video recording of app usage and identify:
+1. Steps to reproduce any bugs shown
+2. UI glitches or animation issues
+3. Error screens or crashes
+4. User flow problems
+5. Performance issues (lag, freezes)
+
+${context ? `Additional context: ${context}` : ''}
+
+Return JSON format:
+{
+  "action": "analyze",
+  "steps_to_reproduce": ["step1", "step2"],
+  "issues": ["issue1", "issue2"],
+  "severity": "high|medium|low",
+  "message": "Detailed analysis with fix recommendations",
+  "files": { "path/file.tsx": "// Fixed code if applicable" }
+}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: base64Video,
+              },
+            },
+          ],
+        }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || 'Video API Error');
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {
+        return { action: 'message', message: text };
+      }
+    }
+    return { action: 'message', message: text };
+  } catch (e: any) {
+    throw new Error(e.message || 'Video analysis failed');
+  }
+}
+
+/**
+ * Transcribe and analyze voice message
+ */
+export async function analyzeVoice(
+  base64Audio: string,
+  mimeType: string = 'audio/mpeg',
+  context?: string
+): Promise<AIResponse> {
+  const provider = getActiveAIProvider();
+  if (!provider) {
+    throw new Error('No API key configured. Add one in Settings.');
+  }
+
+  if (provider.type !== 'gemini') {
+    return {
+      action: 'message',
+      message: 'Voice analysis requires Gemini API. Please add a Gemini API key in Settings.',
+    };
+  }
+
+  const url = `${API_ENDPOINTS.gemini}?key=${provider.apiKey}`;
+  
+  const prompt = `You are App Factory AI. Listen to this voice message and understand what the user wants.
+
+The user might be:
+1. Describing an app they want to build
+2. Explaining a bug or error
+3. Asking for help with code
+4. Requesting modifications to existing code
+
+${context ? `Current context: ${context}` : ''}
+
+First transcribe what they said, then respond appropriately.
+
+Return JSON format:
+{
+  "action": "write_code" | "fix_error" | "message" | "analyze",
+  "transcription": "What the user said",
+  "message": "Your response",
+  "files": { "path/file.tsx": "// Code if needed" }
+}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: prompt },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: base64Audio,
+              },
+            },
+          ],
+        }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || 'Audio API Error');
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {
+        return { action: 'message', message: text };
+      }
+    }
+    return { action: 'message', message: text };
+  } catch (e: any) {
+    throw new Error(e.message || 'Voice analysis failed');
+  }
+}
+
+/**
+ * Multi-modal analysis - Screenshot + Description
+ */
+export async function analyzeWithMedia(
+  prompt: string,
+  media: { type: string; data: string; mimeType: string }
+): Promise<AIResponse> {
+  const provider = getActiveAIProvider();
+  if (!provider) {
+    throw new Error('No API key configured. Add one in Settings.');
+  }
+
+  if (provider.type !== 'gemini') {
+    // For non-Gemini providers, just use text
+    return chatWithGemini(`${prompt}\n\n[User attached a ${media.type} file but vision is only available with Gemini]`);
+  }
+
+  const url = `${API_ENDPOINTS.gemini}?key=${provider.apiKey}`;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: `${SYSTEM_PROMPT}\n\n## USER REQUEST (with attached ${media.type}):\n${prompt}` },
+            {
+              inline_data: {
+                mime_type: media.mimeType,
+                data: media.data,
+              },
+            },
+          ],
+        }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
+      }),
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || 'Vision API Error');
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {
+        return { action: 'message', message: text };
+      }
+    }
+    return { action: 'message', message: text };
+  } catch (e: any) {
+    throw new Error(e.message || 'Media analysis failed');
+  }
+}
