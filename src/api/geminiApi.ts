@@ -13,7 +13,7 @@ import { useStore, getActiveAIProvider } from '../store/useStore';
 
 // API Endpoints for all providers
 const API_ENDPOINTS: Record<string, string> = {
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+  gemini: 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
   huggingface: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-70B-Instruct',

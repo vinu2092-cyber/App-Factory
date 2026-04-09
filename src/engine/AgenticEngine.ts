@@ -561,7 +561,7 @@ Return ONLY the fixed files in JSON:
 {"files":{"path/file.tsx":"// complete fixed content"}}`;
 
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${provider.apiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${provider.apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -654,7 +654,7 @@ Return format:
 {"files":{"path/file.tsx":"// complete fixed content"}, "explanation": "what was wrong and what was fixed"}`;
 
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${provider.apiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${provider.apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
