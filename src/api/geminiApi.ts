@@ -13,7 +13,7 @@ import { useStore, getActiveAIProvider } from '../store/useStore';
 
 // API Endpoints for all providers
 const API_ENDPOINTS: Record<string, string> = {
-  gemini: 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
   huggingface: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-70B-Instruct',
@@ -221,7 +221,9 @@ Return ONLY JSON:
 // ===========================================
 
 async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const res = await fetch(`${API_ENDPOINTS.gemini}?key=${apiKey}`, {
+  const url = `${API_ENDPOINTS.gemini}?key=${apiKey}`;
+  
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -229,9 +231,29 @@ async function callGemini(prompt: string, apiKey: string): Promise<string> {
       generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
     }),
   });
-  if (!res.ok) throw new Error((await res.json())?.error?.message || 'Gemini API Error');
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    const errMsg = errData?.error?.message || '';
+    
+    if (res.status === 429 || errMsg.includes('quota')) {
+      throw new Error('API quota exceeded. Check billing at ai.google.dev or use a different API key.');
+    }
+    if (res.status === 404 || errMsg.includes('not found')) {
+      throw new Error('Model not available. Check your API key permissions.');
+    }
+    if (res.status === 403) {
+      throw new Error('API key invalid or disabled. Generate a new key at ai.google.dev');
+    }
+    throw new Error(errMsg || `Gemini API Error (${res.status})`);
+  }
+
   const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('Empty response from Gemini. Try again.');
+  }
+  return text;
 }
 
 async function callOpenAICompatible(prompt: string, apiKey: string, type: string): Promise<string> {
