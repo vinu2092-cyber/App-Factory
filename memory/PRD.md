@@ -123,3 +123,15 @@ App Factory - Android mobile app jo Android mobile apps build karegi. User app i
 - **Progress status in chat**: Status updates visible in chat
 - **Files created**: Shows which files are being generated
 - **GitHub commits**: Real-time commits for each file
+
+### Voice Input Feature (April 9, 2026)
+- **Mic button**: Red mic button in input area
+- **Hindi/English support**: Speak in any language
+- **Auto transcription**: Gemini transcribes voice to text
+- **Auto processing**: After recording, AI processes the command
+- **Recording indicator**: Shows recording duration and status
+- **Cancel option**: Can cancel recording anytime
+
+### Settings Improvements (April 9, 2026)
+- **Groq recommendation banner**: Prominent banner to add Groq as backup
+- **Auto-fallback info**: Shows that multiple providers enable fallback

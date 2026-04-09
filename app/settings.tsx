@@ -105,6 +105,26 @@ export default function Settings() {
               Add multiple AI providers. App Factory will use the active one for code generation.
             </Text>
 
+            {/* Groq Recommendation Banner */}
+            {!store.aiProviders.some(p => p.type === 'groq') && (
+              <TouchableOpacity 
+                style={styles.recommendBanner}
+                onPress={() => {
+                  setNewAI({ type: 'groq', apiKey: '' });
+                  setModal('ai');
+                }}
+              >
+                <View style={styles.recommendIcon}>
+                  <Ionicons name="flash" size={20} color="#FF6B35" />
+                </View>
+                <View style={styles.recommendContent}>
+                  <Text style={styles.recommendTitle}>Groq Add karo - FREE Backup!</Text>
+                  <Text style={styles.recommendDesc}>Gemini fail ho toh Groq automatic use hoga. Super fast hai!</Text>
+                </View>
+                <Ionicons name="add-circle" size={24} color="#FF6B35" />
+              </TouchableOpacity>
+            )}
+
             {/* Existing Providers */}
             {store.aiProviders.map(p => {
               const info = AI_PROVIDERS.find(pr => pr.type === p.type);
@@ -550,4 +570,10 @@ const styles = StyleSheet.create({
   providerBtnText: { fontSize: 13, fontWeight: '600' },
   modalSubmit: { backgroundColor: '#A78BFA', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
   modalSubmitText: { color: '#0A0A0F', fontSize: 16, fontWeight: 'bold' },
+  // Recommend Banner
+  recommendBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF6B3510', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#FF6B35', marginBottom: 12, gap: 12 },
+  recommendIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FF6B3520', alignItems: 'center', justifyContent: 'center' },
+  recommendContent: { flex: 1 },
+  recommendTitle: { color: '#FF6B35', fontSize: 14, fontWeight: 'bold' },
+  recommendDesc: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
 });

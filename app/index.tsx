@@ -72,6 +72,8 @@ export default function HomeScreen() {
   const [progressLogs, setProgressLogs] = useState<Array<{ msg: string; type: 'info' | 'file' | 'success' | 'error' }>>([]);
   const [showProgressPanel, setShowProgressPanel] = useState(false);
   const [liveGitHubPush, setLiveGitHubPush] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   
   const hasKey = useStore.getState().aiProviders.length > 0;
   const activeProvider = useStore.getState().aiProviders.find(
@@ -301,6 +303,112 @@ export default function HomeScreen() {
       scrollToBottom();
     }
   }, [linkedRepo, ghAccount, addMessage, scrollToBottom]);
+
+  // Voice Recording - Start
+  const startVoiceRecording = useCallback(async () => {
+    try {
+      const VoiceService = require('../src/services/VoiceInputService').voiceInputService;
+      const started = await VoiceService.startRecording();
+      
+      if (started) {
+        setIsRecording(true);
+        setRecordingDuration(0);
+        
+        // Update duration every second
+        const interval = setInterval(() => {
+          setRecordingDuration(prev => prev + 1);
+        }, 1000);
+        
+        // Store interval ID to clear later
+        (global as any).recordingInterval = interval;
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    }
+  }, []);
+
+  // Voice Recording - Stop and Send
+  const stopVoiceRecording = useCallback(async () => {
+    try {
+      // Clear interval
+      if ((global as any).recordingInterval) {
+        clearInterval((global as any).recordingInterval);
+      }
+      
+      setIsRecording(false);
+      
+      const VoiceService = require('../src/services/VoiceInputService').voiceInputService;
+      const result = await VoiceService.stopRecording();
+      
+      if (result) {
+        // Set as attached media and auto-send
+        setAttachedMedia({
+          type: 'audio',
+          uri: result.uri,
+          base64: result.base64,
+          mimeType: 'audio/mp4',
+        });
+        
+        addMessage({ 
+          role: 'ai', 
+          content: `${result.duration}s voice recording attached. Processing...` 
+        });
+        
+        // Auto process voice
+        setIsProcessing(true);
+        setProcessingStatus('Voice transcribe ho raha hai...');
+        scrollToBottom();
+        
+        try {
+          await loadAIModules();
+          const res = await _analyzeVoice(result.base64, 'audio/mp4', '');
+          
+          // Show transcription
+          if (res?.transcription) {
+            addMessage({ role: 'user', content: `[Voice] ${res.transcription}` });
+          }
+          
+          // Handle response based on action
+          if ((res?.action === 'write_code' || res?.action === 'fix_error') && res.files) {
+            const fileCount = Object.keys(res.files).length;
+            addMessage({ 
+              role: 'ai', 
+              content: `Voice samjha! ${fileCount} files generate ho gayi.\n\n${res.message || ''}` 
+            });
+            setPendingFiles(res.files);
+            setShowActions(true);
+          } else {
+            addMessage({ role: 'ai', content: res?.message || 'Voice processed!' });
+          }
+        } catch (e: any) {
+          addMessage({ role: 'ai', content: `Voice processing error: ${e.message}` });
+        } finally {
+          setIsProcessing(false);
+          setAttachedMedia(null);
+        }
+        
+        scrollToBottom();
+      }
+    } catch (e: any) {
+      setIsRecording(false);
+      Alert.alert('Error', e.message);
+    }
+  }, [addMessage, scrollToBottom, setPendingFiles]);
+
+  // Cancel voice recording
+  const cancelVoiceRecording = useCallback(async () => {
+    if ((global as any).recordingInterval) {
+      clearInterval((global as any).recordingInterval);
+    }
+    
+    setIsRecording(false);
+    setRecordingDuration(0);
+    
+    try {
+      const VoiceService = require('../src/services/VoiceInputService').voiceInputService;
+      await VoiceService.cancelRecording();
+    } catch {}
+  }, []);
 
   // Push to GitHub
   const pushToGitHub = useCallback(async () => {
@@ -838,34 +946,70 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={styles.mediaBtn}
             onPress={() => setShowMediaMenu(true)}
+            disabled={isRecording}
             data-testid="media-btn"
           >
             <Ionicons name="attach" size={24} color="#A78BFA" />
           </TouchableOpacity>
           
-          <TextInput
-            style={styles.input}
-            placeholder={attachedMedia ? "Describe kya analyze karna hai..." : hasPendingFiles ? "Kuch aur karna hai? Batao..." : "App idea describe karo..."}
-            placeholderTextColor="#6B7280"
-            value={input}
-            onChangeText={setInput}
-            multiline
-            maxLength={2000}
-            onFocus={scrollToBottom}
-            data-testid="chat-input"
-          />
-          <TouchableOpacity 
-            style={[styles.sendBtn, (!input.trim() && !attachedMedia || isProcessing) && styles.sendDisabled]} 
-            onPress={send}
-            disabled={(!input.trim() && !attachedMedia) || isProcessing}
-            data-testid="send-btn"
-          >
-            {isProcessing ? (
-              <ActivityIndicator color="#0A0A0F" size="small" />
-            ) : (
-              <Ionicons name="send" size={20} color="#0A0A0F" />
-            )}
-          </TouchableOpacity>
+          {/* Voice Recording UI */}
+          {isRecording ? (
+            <View style={styles.recordingContainer}>
+              <View style={styles.recordingIndicator}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingTime}>{recordingDuration}s</Text>
+              </View>
+              <Text style={styles.recordingText}>Recording... Hindi/English mein bolo</Text>
+              <TouchableOpacity style={styles.cancelRecordBtn} onPress={cancelVoiceRecording}>
+                <Ionicons name="close" size={18} color="#EF4444" />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TextInput
+              style={styles.input}
+              placeholder={attachedMedia ? "Describe kya analyze karna hai..." : hasPendingFiles ? "Kuch aur karna hai? Batao..." : "App idea describe karo ya mic tap karo..."}
+              placeholderTextColor="#6B7280"
+              value={input}
+              onChangeText={setInput}
+              multiline
+              maxLength={2000}
+              onFocus={scrollToBottom}
+              data-testid="chat-input"
+            />
+          )}
+          
+          {/* Voice/Send Button */}
+          {isRecording ? (
+            <TouchableOpacity 
+              style={styles.stopRecordBtn}
+              onPress={stopVoiceRecording}
+              data-testid="stop-record-btn"
+            >
+              <Ionicons name="checkmark" size={24} color="#FFF" />
+            </TouchableOpacity>
+          ) : input.trim() || attachedMedia ? (
+            <TouchableOpacity 
+              style={[styles.sendBtn, isProcessing && styles.sendDisabled]} 
+              onPress={send}
+              disabled={isProcessing}
+              data-testid="send-btn"
+            >
+              {isProcessing ? (
+                <ActivityIndicator color="#0A0A0F" size="small" />
+              ) : (
+                <Ionicons name="send" size={20} color="#0A0A0F" />
+              )}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={styles.micBtn}
+              onPress={startVoiceRecording}
+              disabled={isProcessing}
+              data-testid="mic-btn"
+            >
+              <Ionicons name="mic" size={24} color="#FFF" />
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
 
@@ -1092,4 +1236,13 @@ const styles = StyleSheet.create({
   progressSuccess: { color: '#10B981' },
   progressError: { color: '#EF4444' },
   progressFile: { color: '#A78BFA' },
+  // Voice Recording
+  micBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
+  recordingContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F1F2E', borderRadius: 14, paddingHorizontal: 14, gap: 8 },
+  recordingIndicator: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444' },
+  recordingTime: { color: '#EF4444', fontSize: 14, fontWeight: 'bold' },
+  recordingText: { flex: 1, color: '#9CA3AF', fontSize: 12 },
+  cancelRecordBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#1F1F2E', alignItems: 'center', justifyContent: 'center' },
+  stopRecordBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' },
 });
