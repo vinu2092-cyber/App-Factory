@@ -29,11 +29,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.4'
-
       - name: Install dependencies
         run: yarn install --frozen-lockfile || yarn install
 
@@ -47,36 +42,48 @@ jobs:
         env:
           EXPO_NO_TELEMETRY: 1
 
-      - name: Fix Gradle Configuration
+      - name: Fix Kotlin/Gradle Compatibility
         run: |
-          # Copy optimized gradle properties
-          if [ -f "android-config/gradle.properties" ]; then
-            cp android-config/gradle.properties android/gradle.properties
+          cd android
+          
+          # Fix gradle.properties
+          cat >> gradle.properties << 'EOF'
+          
+          # Kotlin compatibility fixes
+          kotlin.jvm.target.validation.mode=warning
+          android.suppressUnsupportedCompileSdk=34
+          org.gradle.jvmargs=-Xmx4g -XX:+HeapDumpOnOutOfMemoryError
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          EOF
+          
+          # Set Kotlin version in build.gradle
+          sed -i 's/kotlinVersion = .*/kotlinVersion = "1.9.22"/' build.gradle 2>/dev/null || true
+          
+          # Update settings.gradle to fix layout issue
+          if grep -q "layout" settings.gradle; then
+            sed -i 's/layout\.projectDirectory/rootProject.projectDir/g' settings.gradle
           fi
           
-          # Update gradle wrapper to compatible version
-          cd android
-          sed -i 's/distributionUrl=.*/distributionUrl=https\\:\/\/services.gradle.org\/distributions\/gradle-8.4-all.zip/' gradle/wrapper/gradle-wrapper.properties
+          # Add Kotlin version to root build.gradle if not present
+          if ! grep -q "ext.kotlinVersion" build.gradle; then
+            sed -i '1i buildscript { ext.kotlinVersion = "1.9.22" }' build.gradle
+          fi
           
-          # Show config for debugging
-          echo "=== gradle-wrapper.properties ==="
-          cat gradle/wrapper/gradle-wrapper.properties
-          echo ""
           echo "=== gradle.properties ==="
           cat gradle.properties
+          echo ""
+          echo "=== build.gradle (first 30 lines) ==="
+          head -30 build.gradle
 
       - name: Grant gradlew permission
         run: chmod +x android/gradlew
-
-      - name: Clean Gradle
-        working-directory: android
-        run: ./gradlew clean --warning-mode all
 
       - name: Build Release APK
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon --stacktrace --warning-mode all
         env:
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:+HeapDumpOnOutOfMemoryError"
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g"
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
@@ -84,16 +91,3 @@ jobs:
           name: app-factory-release-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: warn
-
-      - name: Build Release AAB (Play Store)
-        working-directory: android
-        run: ./gradlew bundleRelease --no-daemon --warning-mode all
-        continue-on-error: true
-
-      - name: Upload Release AAB
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: app-factory-release-aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
-          if-no-files-found: ignore

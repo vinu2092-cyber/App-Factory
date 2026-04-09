@@ -100,18 +100,28 @@ git push origin main
 | OpenRouter | openrouter.ai/keys | `sk-or-...` |
 | GitHub | Settings → Developer → Tokens | `ghp_...` |
 
-## GitHub Actions
+## GitHub Actions - Build Options
 
-On every push to `main`, the workflow automatically:
-1. Sets up Node.js 20 & Java 17
-2. Installs dependencies
-3. Runs `expo prebuild`
-4. Builds Debug APK
-5. Builds Release APK
-6. Builds Release AAB
-7. Uploads artifacts
+### Option 1: Simple Build (Recommended)
+Uses `build-simple.yml` - most reliable for Expo SDK 54:
+1. Go to **Actions** tab
+2. Select **"Build APK (Simple)"**
+3. Click **"Run workflow"**
+4. Download APK from artifacts
 
-Download your APK from **Actions → Build → Artifacts**
+### Option 2: EAS Build (For Expo Account)
+Uses `build-eas.yml` - requires EXPO_TOKEN secret:
+1. Create account on expo.dev
+2. Get token from expo.dev/settings/access-tokens
+3. Add `EXPO_TOKEN` secret in repo settings
+4. Run the workflow
+
+### Option 3: Standard Build
+Uses `build-android.yml` - may have Kotlin compatibility issues
+
+**Note**: If build fails with "Unresolved reference" errors, use Option 1.
+
+Download your APK from **Actions → [Workflow] → Artifacts**
 
 ## Usage
 
