@@ -46,6 +46,11 @@ jobs:
         run: |
           cd android
           
+          # Expo SDK 54 requires Kotlin 2.0.0 or higher (NOT 1.9.x!)
+          # Supported: 2.2.20, 2.2.10, 2.2.0, 2.1.x, 2.0.x
+          sed -i 's/kotlinVersion = "[^"]*"/kotlinVersion = "2.0.0"/' build.gradle
+          sed -i 's/ext\.kotlinVersion = "[^"]*"/ext.kotlinVersion = "2.0.0"/' build.gradle
+          
           # Fix gradle.properties
           cat >> gradle.properties << 'EOF'
           
@@ -57,24 +62,11 @@ jobs:
           org.gradle.caching=true
           EOF
           
-          # Set Kotlin version in build.gradle
-          sed -i 's/kotlinVersion = .*/kotlinVersion = "1.9.22"/' build.gradle 2>/dev/null || true
-          
-          # Update settings.gradle to fix layout issue
-          if grep -q "layout" settings.gradle; then
-            sed -i 's/layout\.projectDirectory/rootProject.projectDir/g' settings.gradle
-          fi
-          
-          # Add Kotlin version to root build.gradle if not present
-          if ! grep -q "ext.kotlinVersion" build.gradle; then
-            sed -i '1i buildscript { ext.kotlinVersion = "1.9.22" }' build.gradle
-          fi
-          
+          echo "=== Kotlin version check ==="
+          grep -i "kotlinVersion" build.gradle || echo "No kotlinVersion found"
+          echo ""
           echo "=== gradle.properties ==="
           cat gradle.properties
-          echo ""
-          echo "=== build.gradle (first 30 lines) ==="
-          head -30 build.gradle
 
       - name: Grant gradlew permission
         run: chmod +x android/gradlew

@@ -36,19 +36,16 @@ jobs:
         env:
           EXPO_NO_TELEMETRY: 1
 
-      - name: Patch Kotlin Issues
+      - name: Fix Kotlin Version (Expo SDK 54 requires Kotlin 2.0+)
         run: |
           cd android
           
-          # Add Kotlin version explicitly
-          cat > kotlin-version.gradle << 'KOTLIN'
-          ext {
-              kotlinVersion = '1.9.22'
-          }
-          KOTLIN
+          # Expo SDK 54 requires Kotlin 2.0.0 or higher
+          # Update build.gradle to use Kotlin 2.0.0
+          sed -i 's/kotlinVersion = "[^"]*"/kotlinVersion = "2.0.0"/' build.gradle
           
-          # Prepend kotlin version to build.gradle
-          cat kotlin-version.gradle build.gradle > temp.gradle && mv temp.gradle build.gradle
+          # Also update if it's using ext block
+          sed -i 's/ext\.kotlinVersion = "[^"]*"/ext.kotlinVersion = "2.0.0"/' build.gradle
           
           # Fix gradle.properties for compatibility
           echo "" >> gradle.properties
@@ -57,8 +54,9 @@ jobs:
           echo "org.gradle.jvmargs=-Xmx4096m" >> gradle.properties
           
           # Debug output
-          echo "=== build.gradle start ==="
-          head -20 build.gradle
+          echo "=== build.gradle (checking Kotlin version) ==="
+          grep -i "kotlin" build.gradle | head -10
+          echo ""
           echo "=== gradle.properties ==="
           cat gradle.properties
 
