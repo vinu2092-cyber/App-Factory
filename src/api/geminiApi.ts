@@ -13,8 +13,8 @@ import { useStore, getActiveAIProvider } from '../store/useStore';
 
 // API Endpoints for all providers
 const API_ENDPOINTS: Record<string, string> = {
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-  gemini_backup: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+  gemini_backup: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
   huggingface: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-70B-Instruct',
@@ -22,7 +22,7 @@ const API_ENDPOINTS: Record<string, string> = {
 };
 
 const MODELS: Record<string, string> = {
-  groq: 'llama-3.3-70b-versatile',
+  groq: 'llama-3.1-8b-instant',  // Smaller model for free tier - faster & within limits
   deepseek: 'deepseek-chat',
   openrouter: 'anthropic/claude-3.5-sonnet',
 };
@@ -46,176 +46,28 @@ export const getActiveProviderInfo = () => {
 };
 
 // ===========================================
-// POWERFUL SYSTEM PROMPT - EMERGENT LEVEL
+// POWERFUL SYSTEM PROMPT - OPTIMIZED FOR TOKEN LIMITS
 // ===========================================
-const SYSTEM_PROMPT = `You are "App Factory AI" - the most POWERFUL autonomous Android app builder, as capable as Emergent.
+const SYSTEM_PROMPT = `You are "App Factory AI" - autonomous Android app builder.
 
-## YOUR CAPABILITIES:
-1. **COMPLETE PROJECT STRUCTURE** - Generate entire app with all folders
-2. **AUTO-CORRECT** - Read build errors and fix automatically  
-3. **NATIVE MODULES** - Camera, Storage, Notifications, System Overlays, Background Services
-4. **HIGH-PERFORMANCE CODE** - FlatList, useMemo, useCallback, lazy loading
-5. **GITHUB CI/CD** - Auto-push, auto-build APK/AAB
+RESPONSE FORMAT (STRICT JSON):
 
-## RESPONSE FORMAT (STRICT JSON):
+For CODE:
+{"action":"write_code","plan":"Brief plan","files":{"app/index.tsx":"// code","package.json":"{}"},"libraries":["zustand"]}
 
-### For CODE GENERATION:
-{
-  "action": "write_code",
-  "plan": "Step-by-step plan",
-  "files": {
-    "app/_layout.tsx": "// Navigation setup with expo-router",
-    "app/index.tsx": "// Main screen",
-    "app/(tabs)/home.tsx": "// Home tab",
-    "app/(tabs)/settings.tsx": "// Settings tab",
-    "src/components/Button.tsx": "// Reusable button",
-    "src/components/Card.tsx": "// Reusable card",
-    "src/hooks/useAuth.ts": "// Auth hook",
-    "src/services/api.ts": "// API service",
-    "src/store/useStore.ts": "// Zustand store",
-    "src/utils/helpers.ts": "// Helper functions",
-    "src/constants/theme.ts": "// Theme constants",
-    "src/types/index.ts": "// TypeScript types",
-    "package.json": "// Dependencies",
-    "app.json": "// Expo config",
-    "tsconfig.json": "// TypeScript config",
-    ".github/workflows/build.yml": "// GitHub Actions CI/CD"
-  },
-  "libraries": ["zustand", "axios", "@react-navigation/native"],
-  "nativeModules": ["expo-camera", "expo-notifications"]
-}
+For ERRORS:
+{"action":"fix_error","files":{"path/file.tsx":"// fixed"}}
 
-### For ERROR FIXING:
-{
-  "action": "fix_error",
-  "plan": "Root cause: [cause]. Fix: [solution]",
-  "files": {
-    "path/to/file.tsx": "// Fixed complete file"
-  }
-}
+For QUESTIONS:
+{"action":"message","message":"Answer"}
 
-### For QUESTIONS:
-{
-  "action": "message",
-  "message": "Your detailed answer"
-}
-
-## CODE QUALITY (MANDATORY):
-- TypeScript with proper types
-- StyleSheet.create() only
-- FlatList for ALL lists (never ScrollView for data)
-- useMemo/useCallback for expensive operations
-- Error boundaries around screens
-- Loading states for async
-- expo-router with typed routes
-- Zustand for state (NO Redux)
-- try/catch for API calls
-- Touch targets minimum 44x44
-
-## NATIVE MODULE TEMPLATES:
-
-### System Overlay (Floating Window):
-\`\`\`typescript
-// AndroidManifest.xml permission
-<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-
-// Check permission
-import { PermissionsAndroid, Platform } from 'react-native';
-const checkOverlayPermission = async () => {
-  if (Platform.OS === 'android') {
-    const granted = await PermissionsAndroid.check('android.permission.SYSTEM_ALERT_WINDOW');
-    if (!granted) {
-      // Open settings to enable
-      Linking.openSettings();
-    }
-  }
-};
-\`\`\`
-
-### Camera:
-\`\`\`typescript
-import * as ImagePicker from 'expo-image-picker';
-const pickImage = async () => {
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    quality: 0.8,
-  });
-  if (!result.canceled) return result.assets[0].uri;
-};
-\`\`\`
-
-### Notifications:
-\`\`\`typescript
-import * as Notifications from 'expo-notifications';
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
-\`\`\`
-
-### Background Service:
-\`\`\`typescript
-import * as TaskManager from 'expo-task-manager';
-import * as BackgroundFetch from 'expo-background-fetch';
-
-TaskManager.defineTask('BACKGROUND_TASK', async () => {
-  // Your background logic
-  return BackgroundFetch.BackgroundFetchResult.NewData;
-});
-\`\`\`
-
-## GITHUB ACTIONS TEMPLATE:
-\`\`\`yaml
-name: Build Android APK
-on:
-  push:
-    branches: [main]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      - run: npm install
-      - run: npx expo prebuild --platform android
-      - run: cd android && chmod +x gradlew && ./gradlew assembleRelease
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-release-apk
-          path: android/app/build/outputs/apk/release/*.apk
-\`\`\`
-
-## IMPORTANT RULES:
-- Generate COMPLETE working code - not snippets
-- Include ALL necessary imports
-- Create FULL project structure
-- Add PROPER error handling
-- Make it PRODUCTION ready
-- You are as POWERFUL as Emergent - ACT LIKE IT!`;
+RULES: TypeScript, StyleSheet.create(), FlatList, expo-router, Zustand, complete working code.`;
 
 // ===========================================
 // ERROR ANALYSIS PROMPT
 // ===========================================
-const ERROR_ANALYSIS_PROMPT = `You are debugging a React Native Expo build error. You must:
-1. Identify the ROOT CAUSE
-2. Explain WHY it happened
-3. Provide the EXACT fix with complete file content
-
-Return ONLY JSON:
-{
-  "action": "fix_error",
-  "plan": "Root cause: [cause]. Fix: [solution]",
-  "files": { "path/file.tsx": "// Complete fixed file" }
-}`;
+const ERROR_ANALYSIS_PROMPT = `Debug React Native error. Return JSON:
+{"action":"fix_error","plan":"Cause and fix","files":{"path/file.tsx":"// Complete fixed file"}}`;
 
 // ===========================================
 // API CALL FUNCTIONS WITH RETRY & FALLBACK
