@@ -449,7 +449,6 @@ export async function chatWithGemini(
 
   // All providers failed
   throw new Error(`Sabhi AI providers fail ho gaye. Last error: ${lastError.message}\n\nSuggestion: Settings mein ek aur AI provider add karo (Groq ya DeepSeek free hai).`);
-  }
 }
 
 // ===========================================
