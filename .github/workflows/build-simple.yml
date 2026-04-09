@@ -10,14 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout
+      - name: Checkout (Fresh - No Cache)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
+          # Removed cache to ensure fresh build
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -28,43 +30,49 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Dependencies
-        run: yarn install
+      - name: Clean Install Dependencies
+        run: |
+          rm -rf node_modules
+          rm -rf yarn.lock
+          yarn install
 
-      - name: Prebuild Android
-        run: npx expo prebuild --platform android --clean
+      - name: Clear All Caches
+        run: |
+          rm -rf /tmp/metro-*
+          rm -rf /tmp/haste-*
+          rm -rf ~/.gradle/caches
+          rm -rf node_modules/.cache
+
+      - name: Debug - Show API file content
+        run: |
+          echo "=== SYSTEM_PROMPT in geminiApi.ts ==="
+          grep -A 10 "SYSTEM_PROMPT" src/api/geminiApi.ts | head -15
+          echo ""
+          echo "=== generateFullProject function ==="
+          grep -A 5 "export async function generateFullProject" src/api/geminiApi.ts
+
+      - name: Prebuild Android (Clean)
+        run: |
+          rm -rf android
+          npx expo prebuild --platform android --clean
         env:
           EXPO_NO_TELEMETRY: 1
 
-      - name: Fix Kotlin Version (Expo SDK 54 requires Kotlin 2.0+)
+      - name: Fix Kotlin Version
         run: |
           cd android
-          
-          # Expo SDK 54 requires Kotlin 2.0.0 or higher
-          # Update build.gradle to use Kotlin 2.0.0
           sed -i 's/kotlinVersion = "[^"]*"/kotlinVersion = "2.0.0"/' build.gradle
-          
-          # Also update if it's using ext block
           sed -i 's/ext\.kotlinVersion = "[^"]*"/ext.kotlinVersion = "2.0.0"/' build.gradle
-          
-          # Fix gradle.properties for compatibility
           echo "" >> gradle.properties
           echo "kotlin.jvm.target.validation.mode=warning" >> gradle.properties
           echo "android.suppressUnsupportedCompileSdk=34" >> gradle.properties
           echo "org.gradle.jvmargs=-Xmx4096m" >> gradle.properties
-          
-          # Debug output
-          echo "=== build.gradle (checking Kotlin version) ==="
-          grep -i "kotlin" build.gradle | head -10
-          echo ""
-          echo "=== gradle.properties ==="
-          cat gradle.properties
 
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon -x lint
+          ./gradlew assembleRelease --no-daemon --no-build-cache -x lint
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
