@@ -29,6 +29,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+
       - name: Install dependencies
         run: yarn install --frozen-lockfile || yarn install
 
@@ -42,16 +47,36 @@ jobs:
         env:
           EXPO_NO_TELEMETRY: 1
 
+      - name: Fix Gradle Configuration
+        run: |
+          # Copy optimized gradle properties
+          if [ -f "android-config/gradle.properties" ]; then
+            cp android-config/gradle.properties android/gradle.properties
+          fi
+          
+          # Update gradle wrapper to compatible version
+          cd android
+          sed -i 's/distributionUrl=.*/distributionUrl=https\\:\/\/services.gradle.org\/distributions\/gradle-8.4-all.zip/' gradle/wrapper/gradle-wrapper.properties
+          
+          # Show config for debugging
+          echo "=== gradle-wrapper.properties ==="
+          cat gradle/wrapper/gradle-wrapper.properties
+          echo ""
+          echo "=== gradle.properties ==="
+          cat gradle.properties
+
       - name: Grant gradlew permission
         run: chmod +x android/gradlew
 
       - name: Clean Gradle
         working-directory: android
-        run: ./gradlew clean
+        run: ./gradlew clean --warning-mode all
 
       - name: Build Release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon --stacktrace
+        run: ./gradlew assembleRelease --no-daemon --stacktrace --warning-mode all
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:+HeapDumpOnOutOfMemoryError"
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
@@ -62,7 +87,7 @@ jobs:
 
       - name: Build Release AAB (Play Store)
         working-directory: android
-        run: ./gradlew bundleRelease --no-daemon
+        run: ./gradlew bundleRelease --no-daemon --warning-mode all
         continue-on-error: true
 
       - name: Upload Release AAB
