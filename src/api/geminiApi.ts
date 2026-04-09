@@ -46,28 +46,18 @@ export const getActiveProviderInfo = () => {
 };
 
 // ===========================================
-// POWERFUL SYSTEM PROMPT - OPTIMIZED FOR TOKEN LIMITS
+// MINIMAL SYSTEM PROMPT - Under 500 tokens
 // ===========================================
-const SYSTEM_PROMPT = `You are "App Factory AI" - autonomous Android app builder.
+const SYSTEM_PROMPT = `You are App Factory AI. Generate React Native Expo apps.
 
-RESPONSE FORMAT (STRICT JSON):
+RESPONSE: Return ONLY valid JSON:
+{"action":"write_code","files":{"app/index.tsx":"code","package.json":"{}"},"message":"done"}
 
-For CODE:
-{"action":"write_code","plan":"Brief plan","files":{"app/index.tsx":"// code","package.json":"{}"},"libraries":["zustand"]}
+For questions: {"action":"message","message":"answer"}
 
-For ERRORS:
-{"action":"fix_error","files":{"path/file.tsx":"// fixed"}}
+Rules: TypeScript, StyleSheet.create, expo-router, complete working code.`;
 
-For QUESTIONS:
-{"action":"message","message":"Answer"}
-
-RULES: TypeScript, StyleSheet.create(), FlatList, expo-router, Zustand, complete working code.`;
-
-// ===========================================
-// ERROR ANALYSIS PROMPT
-// ===========================================
-const ERROR_ANALYSIS_PROMPT = `Debug React Native error. Return JSON:
-{"action":"fix_error","plan":"Cause and fix","files":{"path/file.tsx":"// Complete fixed file"}}`;
+const ERROR_ANALYSIS_PROMPT = `Fix error. Return JSON: {"action":"fix_error","files":{"file.tsx":"fixed code"}}`;
 
 // ===========================================
 // API CALL FUNCTIONS WITH RETRY & FALLBACK
@@ -228,32 +218,13 @@ export async function chatWithGemini(
     throw new Error('No API key configured. Add one in Settings.');
   }
 
-  let fullPrompt = SYSTEM_PROMPT;
+  // Keep prompt minimal to stay under token limits (Groq free tier = 6000 TPM)
+  let fullPrompt = SYSTEM_PROMPT + '\n\nUSER: ' + prompt;
   
+  // Only add minimal context if needed
   if (context?.errorLogs) {
-    fullPrompt += `\n\n${ERROR_ANALYSIS_PROMPT}\n\n## BUILD ERROR LOGS:\n\`\`\`\n${context.errorLogs}\n\`\`\``;
+    fullPrompt += '\n\nError: ' + context.errorLogs.slice(0, 500);
   }
-  
-  if (context?.existingFiles) {
-    fullPrompt += `\n\n## EXISTING PROJECT FILES:\n${JSON.stringify(Object.keys(context.existingFiles), null, 2)}`;
-  }
-
-  // Add conversation history for context
-  if (context?.chatHistory && context.chatHistory.length > 0) {
-    // Keep last 10 messages for context
-    const recentHistory = context.chatHistory.slice(-10);
-    fullPrompt += `\n\n## CONVERSATION HISTORY (maintain context, understand follow-up questions):\n`;
-    for (const msg of recentHistory) {
-      fullPrompt += `${msg.role === 'user' ? 'USER' : 'AI'}: ${msg.content.slice(0, 500)}\n`;
-    }
-  }
-
-  // Tell AI about current state
-  if (context?.hasPendingFiles) {
-    fullPrompt += `\n\n## CURRENT STATE: User has already generated code files. They are asking a FOLLOW-UP question about those files. Understand their intent - they might want to: push to GitHub, test, modify code, add features, or debug. Do NOT start fresh. Respond in context of what was already built.`;
-  }
-  
-  fullPrompt += `\n\n## USER REQUEST:\n${prompt}`;
 
   // Try with active provider first, then fallback to others
   const providersToTry = [activeProvider, ...allProviders.filter(p => p.id !== activeProvider.id)];
@@ -308,24 +279,8 @@ export async function chatWithGemini(
 // ===========================================
 
 export async function generateFullProject(description: string): Promise<AIResponse> {
-  return chatWithGemini(`Create a COMPLETE React Native Expo project for: ${description}
-
-Include ALL of these:
-- app/_layout.tsx (navigation)
-- app/index.tsx (main screen)
-- Multiple screens in app/(tabs)/ or app/screens/
-- src/components/ (reusable UI components)
-- src/hooks/ (custom hooks)
-- src/services/api.ts (API service)
-- src/store/useStore.ts (Zustand state)
-- src/utils/ (helpers)
-- src/constants/theme.ts
-- src/types/index.ts
-- package.json with ALL dependencies
-- app.json configured
-- .github/workflows/build.yml for CI/CD
-
-Make it PRODUCTION READY with proper error handling!`);
+  // Minimal prompt to stay under token limits
+  return chatWithGemini(`Create React Native Expo app: ${description}. Include: app/index.tsx, package.json, app.json. Return complete working code.`);
 }
 
 /**
