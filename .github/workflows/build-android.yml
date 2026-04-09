@@ -1,11 +1,10 @@
-name: Build Android APK & AAB
+name: Build Android APK & AAB (DISABLED)
+
+# DISABLED - Use "Build APK (Simple)" instead
+# This workflow has Kotlin compatibility issues
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Only manual trigger now
 
 jobs:
   build:

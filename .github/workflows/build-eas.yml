@@ -1,11 +1,10 @@
-name: Build Android APK with EAS
+name: Build Android APK with EAS (DISABLED)
+
+# DISABLED - Requires EXPO_TOKEN secret
+# Use "Build APK (Simple)" for builds without Expo account
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Only manual trigger now
 
 jobs:
   build:
