@@ -306,6 +306,8 @@ export async function chatWithGemini(
   context?: {
     errorLogs?: string;
     existingFiles?: Record<string, string>;
+    chatHistory?: Array<{ role: string; content: string }>;
+    hasPendingFiles?: boolean;
   }
 ): Promise<AIResponse> {
   const provider = getActiveAIProvider();
@@ -320,7 +322,22 @@ export async function chatWithGemini(
   }
   
   if (context?.existingFiles) {
-    fullPrompt += `\n\n## EXISTING FILES:\n${JSON.stringify(Object.keys(context.existingFiles), null, 2)}`;
+    fullPrompt += `\n\n## EXISTING PROJECT FILES:\n${JSON.stringify(Object.keys(context.existingFiles), null, 2)}`;
+  }
+
+  // Add conversation history for context
+  if (context?.chatHistory && context.chatHistory.length > 0) {
+    // Keep last 10 messages for context
+    const recentHistory = context.chatHistory.slice(-10);
+    fullPrompt += `\n\n## CONVERSATION HISTORY (maintain context, understand follow-up questions):\n`;
+    for (const msg of recentHistory) {
+      fullPrompt += `${msg.role === 'user' ? 'USER' : 'AI'}: ${msg.content.slice(0, 500)}\n`;
+    }
+  }
+
+  // Tell AI about current state
+  if (context?.hasPendingFiles) {
+    fullPrompt += `\n\n## CURRENT STATE: User has already generated code files. They are asking a FOLLOW-UP question about those files. Understand their intent - they might want to: push to GitHub, test, modify code, add features, or debug. Do NOT start fresh. Respond in context of what was already built.`;
   }
   
   fullPrompt += `\n\n## USER REQUEST:\n${prompt}`;
