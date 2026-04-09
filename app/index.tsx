@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -51,6 +52,10 @@ export default function HomeScreen() {
     addProject
   } = useStore();
   
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [userRepos, setUserRepos] = useState<Array<{ name: string; fullName: string; description: string }>>([]);
+  
   const hasKey = useStore.getState().aiProviders.length > 0;
   const activeProvider = useStore.getState().aiProviders.find(
     p => p.id === useStore.getState().activeProviderId
@@ -62,6 +67,75 @@ export default function HomeScreen() {
   const scrollToBottom = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
   }, []);
+
+  // Load user repos for import
+  const loadUserRepos = useCallback(async () => {
+    if (!ghAccount) {
+      Alert.alert('No GitHub', 'Settings mein GitHub account add karo');
+      router.push('/settings');
+      return;
+    }
+    
+    setImportLoading(true);
+    try {
+      const { GitHubAutonomousService } = require('../src/engine/AgenticEngine');
+      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      const repos = await service.listUserRepos();
+      setUserRepos(repos);
+      setShowImportModal(true);
+    } catch (e: any) {
+      Alert.alert('Error', `Repos load nahi ho paye: ${e.message}`);
+    } finally {
+      setImportLoading(false);
+    }
+  }, [ghAccount, router]);
+
+  // Import repo files
+  const importRepo = useCallback(async (repoFullName: string) => {
+    if (!ghAccount) return;
+    
+    setShowImportModal(false);
+    setBuildStatus(`Importing ${repoFullName}...`);
+    
+    try {
+      const { GitHubAutonomousService } = require('../src/engine/AgenticEngine');
+      const service = new GitHubAutonomousService(ghAccount.token, ghAccount.username);
+      
+      const repoInfo = await service.getRepoInfo(repoFullName);
+      const files = await service.getRepoFiles(repoFullName, repoInfo.defaultBranch);
+      
+      if (Object.keys(files).length === 0) {
+        setBuildStatus('');
+        addMessage({ role: 'ai', content: `Repo mein koi readable files nahi mili.` });
+        return;
+      }
+      
+      setPendingFiles(files);
+      setLinkedRepo(repoFullName);
+      
+      const projectName = repoInfo.name;
+      addProject({
+        name: projectName,
+        description: repoInfo.description || `Imported from ${repoFullName}`,
+        files: files,
+        repo: repoFullName,
+        buildStatus: 'idle',
+        lastBuildLog: '',
+      });
+      
+      setBuildStatus('');
+      addMessage({ 
+        role: 'ai', 
+        content: `${repoFullName} se ${Object.keys(files).length} files import ho gayi!\n\nFiles:\n- ${Object.keys(files).slice(0, 10).join('\n- ')}${Object.keys(files).length > 10 ? '\n- ...' : ''}\n\nAb changes karke GitHub pe push kar sakte ho ya build start kar sakte ho.` 
+      });
+      setShowActions(true);
+      scrollToBottom();
+    } catch (e: any) {
+      setBuildStatus('');
+      addMessage({ role: 'ai', content: `Import failed: ${e.message}` });
+      scrollToBottom();
+    }
+  }, [ghAccount, setPendingFiles, setLinkedRepo, addProject, addMessage, scrollToBottom]);
 
   // Push to GitHub
   const pushToGitHub = useCallback(async () => {
@@ -260,6 +334,18 @@ export default function HomeScreen() {
           </View>
         </View>
         <View style={styles.headerRight}>
+          <TouchableOpacity 
+            style={styles.iconBtn} 
+            onPress={loadUserRepos}
+            disabled={importLoading}
+            data-testid="import-btn"
+          >
+            {importLoading ? (
+              <ActivityIndicator size="small" color="#A78BFA" />
+            ) : (
+              <Ionicons name="cloud-download" size={22} color="#10B981" />
+            )}
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => router.push('/projects')} data-testid="projects-btn">
             <Ionicons name="folder" size={22} color="#A78BFA" />
           </TouchableOpacity>
@@ -434,6 +520,51 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Import Modal */}
+      <Modal
+        visible={showImportModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowImportModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>GitHub se Import karo</Text>
+              <TouchableOpacity onPress={() => setShowImportModal(false)} data-testid="close-import-modal">
+                <Ionicons name="close" size={24} color="#9CA3AF" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.repoList}>
+              {userRepos.length === 0 ? (
+                <Text style={styles.noReposText}>Koi repos nahi mili</Text>
+              ) : (
+                userRepos.map((repo, i) => (
+                  <TouchableOpacity 
+                    key={i} 
+                    style={styles.repoItem}
+                    onPress={() => importRepo(repo.fullName)}
+                    data-testid={`repo-${repo.name}`}
+                  >
+                    <View style={styles.repoIcon}>
+                      <Ionicons name="git-branch" size={18} color="#A78BFA" />
+                    </View>
+                    <View style={styles.repoInfo}>
+                      <Text style={styles.repoName}>{repo.name}</Text>
+                      <Text style={styles.repoDesc} numberOfLines={1}>
+                        {repo.description || repo.fullName}
+                      </Text>
+                    </View>
+                    <Ionicons name="download" size={20} color="#10B981" />
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -488,4 +619,16 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: '#1F1F2E', color: '#FFF', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, maxHeight: 80, fontSize: 14 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#A78BFA', alignItems: 'center', justifyContent: 'center' },
   sendDisabled: { opacity: 0.5 },
+  // Modal styles
+  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  modal: { width: '90%', maxHeight: '70%', backgroundColor: '#12121A', borderRadius: 16, borderWidth: 1, borderColor: '#A78BFA40' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#1F1F2E' },
+  modalTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold' },
+  repoList: { maxHeight: 400 },
+  noReposText: { color: '#9CA3AF', textAlign: 'center', padding: 30, fontSize: 14 },
+  repoItem: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: '#1F1F2E' },
+  repoIcon: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#1F1F2E', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  repoInfo: { flex: 1 },
+  repoName: { color: '#FFF', fontSize: 14, fontWeight: '600' },
+  repoDesc: { color: '#6B7280', fontSize: 12, marginTop: 2 },
 });

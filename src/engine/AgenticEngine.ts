@@ -13,6 +13,24 @@ import { getActiveAIProvider, getDefaultGitHubAccount, getDefaultExpoAccount } f
 import ExpoTestingService, { ExpoTestResult, ExpoCliCommands } from '../services/ExpoTestingService';
 import NativeModuleTemplates from '../native/NativeModuleTemplates';
 
+// Base64 decode function (React Native compatible)
+const decodeBase64 = (str: string): string => {
+  // Remove newlines
+  const cleanStr = str.replace(/\n/g, '');
+  // Use atob for decoding (available in React Native)
+  try {
+    return decodeURIComponent(
+      atob(cleanStr)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+  } catch {
+    // Fallback for simple ASCII
+    return atob(cleanStr);
+  }
+};
+
 // ===========================================
 // TYPES
 // ===========================================
@@ -192,6 +210,64 @@ export class GitHubAutonomousService {
   async getWorkflowRuns(repoFullName: string): Promise<any[]> {
     const data = await this.request(`/repos/${repoFullName}/actions/runs?per_page=10`);
     return data.workflow_runs || [];
+  }
+
+  /**
+   * Get all files from a GitHub repo (import)
+   */
+  async getRepoFiles(repoFullName: string, branch = 'main'): Promise<Record<string, string>> {
+    const files: Record<string, string> = {};
+    
+    // Get tree recursively
+    const tree = await this.request(`/repos/${repoFullName}/git/trees/${branch}?recursive=1`);
+    
+    for (const item of tree.tree || []) {
+      if (item.type !== 'blob') continue;
+      // Skip binary/large files
+      if (item.size > 500000) continue;
+      const ext = item.path.split('.').pop()?.toLowerCase() || '';
+      const textExts = ['ts', 'tsx', 'js', 'jsx', 'json', 'md', 'yml', 'yaml', 'xml', 'txt', 'css', 'html', 'java', 'kt', 'gradle'];
+      if (!textExts.includes(ext)) continue;
+      
+      try {
+        // Get file content
+        const blob = await this.request(`/repos/${repoFullName}/git/blobs/${item.sha}`);
+        if (blob.encoding === 'base64') {
+          // Decode base64 (React Native compatible)
+          const content = decodeBase64(blob.content);
+          files[item.path] = content;
+        }
+      } catch {
+        // Skip files that fail to fetch
+      }
+    }
+    
+    return files;
+  }
+
+  /**
+   * List user repos (for import selection)
+   */
+  async listUserRepos(): Promise<Array<{ name: string; fullName: string; description: string; updatedAt: string }>> {
+    const repos = await this.request('/user/repos?sort=updated&per_page=30');
+    return repos.map((r: any) => ({
+      name: r.name,
+      fullName: r.full_name,
+      description: r.description || '',
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  /**
+   * Get repo info
+   */
+  async getRepoInfo(repoFullName: string): Promise<{ name: string; description: string; defaultBranch: string }> {
+    const repo = await this.request(`/repos/${repoFullName}`);
+    return {
+      name: repo.name,
+      description: repo.description || '',
+      defaultBranch: repo.default_branch || 'main',
+    };
   }
 
   async getBuildLogs(repoFullName: string, runId: number): Promise<{ logs: string; failedStep: string }> {
