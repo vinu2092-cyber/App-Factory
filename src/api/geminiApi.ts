@@ -477,6 +477,109 @@ Include ALL of these:
 Make it PRODUCTION READY with proper error handling!`);
 }
 
+/**
+ * Generate project with real-time progress updates
+ */
+export async function generateProjectWithProgress(
+  description: string,
+  onProgress: (message: string, type: 'info' | 'file' | 'success' | 'error') => void,
+  githubService?: any,
+  repoFullName?: string
+): Promise<AIResponse> {
+  onProgress('AI project plan bana raha hai...', 'info');
+  
+  const result = await generateFullProject(description);
+  
+  if (result.action === 'write_code' && result.files) {
+    const files = result.files;
+    const fileList = Object.keys(files);
+    const totalFiles = fileList.length;
+    
+    onProgress(`Plan ready! ${totalFiles} files generate hongi`, 'info');
+    onProgress(`Libraries: ${result.libraries?.join(', ') || 'Standard'}`, 'info');
+    
+    // Process each file with progress
+    let processedCount = 0;
+    
+    for (const filePath of fileList) {
+      processedCount++;
+      const progress = Math.round((processedCount / totalFiles) * 100);
+      onProgress(`[${progress}%] Creating: ${filePath}`, 'file');
+      
+      // Small delay to show progress (simulates streaming)
+      await new Promise(r => setTimeout(r, 100));
+      
+      // Push to GitHub if connected
+      if (githubService && repoFullName) {
+        try {
+          onProgress(`[${progress}%] Pushing: ${filePath}`, 'info');
+          await pushFileToGitHub(githubService, repoFullName, filePath, files[filePath]);
+          onProgress(`[${progress}%] Pushed: ${filePath}`, 'success');
+        } catch (e: any) {
+          onProgress(`[${progress}%] Push failed: ${filePath} - ${e.message}`, 'error');
+        }
+      }
+    }
+    
+    onProgress('All files generated successfully!', 'success');
+  }
+  
+  return result;
+}
+
+/**
+ * Push single file to GitHub
+ */
+async function pushFileToGitHub(
+  githubService: any,
+  repoFullName: string,
+  filePath: string,
+  content: string
+): Promise<void> {
+  try {
+    // Get current ref
+    const ref = await githubService.request(`/repos/${repoFullName}/git/ref/heads/main`);
+    const baseSha = ref.object.sha;
+    
+    // Get base commit and tree
+    const baseCommit = await githubService.request(`/repos/${repoFullName}/git/commits/${baseSha}`);
+    const baseTreeSha = baseCommit.tree.sha;
+    
+    // Create blob
+    const blob = await githubService.request(`/repos/${repoFullName}/git/blobs`, {
+      method: 'POST',
+      body: JSON.stringify({ content, encoding: 'utf-8' }),
+    });
+    
+    // Create tree with single file
+    const newTree = await githubService.request(`/repos/${repoFullName}/git/trees`, {
+      method: 'POST',
+      body: JSON.stringify({
+        base_tree: baseTreeSha,
+        tree: [{ path: filePath, mode: '100644', type: 'blob', sha: blob.sha }],
+      }),
+    });
+    
+    // Create commit
+    const newCommit = await githubService.request(`/repos/${repoFullName}/git/commits`, {
+      method: 'POST',
+      body: JSON.stringify({
+        message: `Add ${filePath}`,
+        tree: newTree.sha,
+        parents: [baseSha],
+      }),
+    });
+    
+    // Update ref
+    await githubService.request(`/repos/${repoFullName}/git/refs/heads/main`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sha: newCommit.sha, force: true }),
+    });
+  } catch (e) {
+    throw e;
+  }
+}
+
 export async function autoFixBuildError(errorLogs: string): Promise<AIResponse> {
   return chatWithGemini('Analyze and fix this build error. Return complete fixed files.', { errorLogs });
 }

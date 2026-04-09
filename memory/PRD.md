@@ -115,3 +115,11 @@ App Factory - Android mobile app jo Android mobile apps build karegi. User app i
 - **Backup Model Fallback**: If gemini-2.0-flash fails, automatically tries gemini-1.5-flash
 - **Multi-Provider Fallback**: If all Gemini retries fail, tries other configured providers (Groq, DeepSeek, etc.)
 - **Better Error Messages**: Hindi mein clear error messages with suggestions
+
+### Real-time Progress Feature (April 9, 2026)
+- **Live Progress Panel**: Shows what AI is doing in real-time
+- **Step-by-step logging**: Each file creation, edit, push shown
+- **Live GitHub Push Toggle**: Toggle to push files to GitHub as they are created
+- **Progress status in chat**: Status updates visible in chat
+- **Files created**: Shows which files are being generated
+- **GitHub commits**: Real-time commits for each file
