@@ -109,3 +109,9 @@ App Factory - Android mobile app jo Android mobile apps build karegi. User app i
 - Gemini Vision API used for screenshot/video/audio analysis
 - expo-image-picker for media selection
 - expo-file-system for storage operations
+
+### API Reliability Improvements (April 9, 2026)
+- **Auto-Retry with Exponential Backoff**: If API fails, automatically retries up to 3 times with increasing delays
+- **Backup Model Fallback**: If gemini-2.0-flash fails, automatically tries gemini-1.5-flash
+- **Multi-Provider Fallback**: If all Gemini retries fail, tries other configured providers (Groq, DeepSeek, etc.)
+- **Better Error Messages**: Hindi mein clear error messages with suggestions

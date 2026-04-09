@@ -66,6 +66,7 @@ export default function HomeScreen() {
   const [showMediaMenu, setShowMediaMenu] = useState(false);
   const [attachedMedia, setAttachedMedia] = useState<{ type: string; uri: string; base64?: string; mimeType?: string } | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  const [processingStatus, setProcessingStatus] = useState('AI soch raha hai...');
   
   const hasKey = useStore.getState().aiProviders.length > 0;
   const activeProvider = useStore.getState().aiProviders.find(
@@ -408,6 +409,7 @@ export default function HomeScreen() {
     setInput('');
     setAttachedMedia(null);
     setIsProcessing(true);
+    setProcessingStatus('AI soch raha hai...');
     setShowActions(false);
     scrollToBottom();
 
@@ -418,6 +420,7 @@ export default function HomeScreen() {
       
       // Handle media analysis
       if (media && media.base64) {
+        setProcessingStatus(`${media.type === 'image' ? 'Screenshot' : media.type === 'video' ? 'Video' : 'Audio'} analyze ho raha hai...`);
         addMessage({ role: 'ai', content: `${media.type === 'image' ? 'Screenshot' : media.type === 'video' ? 'Video' : 'Audio'} analyze ho raha hai...` });
         scrollToBottom();
         
@@ -432,6 +435,7 @@ export default function HomeScreen() {
         }
       } else {
         // Normal text processing
+        setProcessingStatus('Project generate ho raha hai (auto-retry enabled)...');
         const chatHistory = useStore.getState().messages.map(m => ({
           role: m.role,
           content: m.content,
@@ -688,7 +692,7 @@ export default function HomeScreen() {
           {isProcessing ? (
             <View style={styles.loading}>
               <ActivityIndicator color="#A78BFA" />
-              <Text style={styles.loadingText}>AI soch raha hai...</Text>
+              <Text style={styles.loadingText}>{processingStatus}</Text>
             </View>
           ) : null}
         </ScrollView>

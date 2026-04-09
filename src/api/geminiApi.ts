@@ -13,7 +13,8 @@ import { useStore, getActiveAIProvider } from '../store/useStore';
 
 // API Endpoints for all providers
 const API_ENDPOINTS: Record<string, string> = {
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+  gemini_backup: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
   huggingface: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-70B-Instruct',
@@ -217,43 +218,100 @@ Return ONLY JSON:
 }`;
 
 // ===========================================
-// API CALL FUNCTIONS
+// API CALL FUNCTIONS WITH RETRY & FALLBACK
 // ===========================================
 
-async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const url = `${API_ENDPOINTS.gemini}?key=${apiKey}`;
+// Delay helper
+const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+// Retry with exponential backoff
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  initialDelay: number = 2000
+): Promise<T> {
+  let lastError: Error = new Error('Unknown error');
   
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
-    }),
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    const errMsg = errData?.error?.message || '';
-    
-    if (res.status === 429 || errMsg.includes('quota')) {
-      throw new Error('API quota exceeded. Check billing at ai.google.dev or use a different API key.');
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastError = e;
+      const isRetryable = 
+        e.message?.includes('high demand') ||
+        e.message?.includes('overloaded') ||
+        e.message?.includes('rate limit') ||
+        e.message?.includes('503') ||
+        e.message?.includes('429') ||
+        e.message?.includes('temporarily');
+      
+      if (!isRetryable || i === maxRetries - 1) {
+        throw e;
+      }
+      
+      const waitTime = initialDelay * Math.pow(2, i);
+      console.log(`Retry ${i + 1}/${maxRetries} after ${waitTime}ms...`);
+      await delay(waitTime);
     }
-    if (res.status === 404 || errMsg.includes('not found')) {
-      throw new Error('Model not available. Check your API key permissions.');
-    }
-    if (res.status === 403) {
-      throw new Error('API key invalid or disabled. Generate a new key at ai.google.dev');
-    }
-    throw new Error(errMsg || `Gemini API Error (${res.status})`);
   }
+  
+  throw lastError;
+}
 
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('Empty response from Gemini. Try again.');
+async function callGemini(prompt: string, apiKey: string): Promise<string> {
+  // Try primary model first, then backup
+  const models = [API_ENDPOINTS.gemini, API_ENDPOINTS.gemini_backup];
+  let lastError: Error = new Error('Unknown error');
+  
+  for (const modelUrl of models) {
+    try {
+      return await retryWithBackoff(async () => {
+        const url = `${modelUrl}?key=${apiKey}`;
+        
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 16384 },
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData?.error?.message || '';
+          
+          // Handle high demand / rate limit errors
+          if (res.status === 429 || res.status === 503 || 
+              errMsg.includes('high demand') || 
+              errMsg.includes('overloaded') ||
+              errMsg.includes('quota')) {
+            throw new Error('Model high demand - retrying automatically...');
+          }
+          if (res.status === 404 || errMsg.includes('not found')) {
+            throw new Error('Model not available. Trying backup...');
+          }
+          if (res.status === 403) {
+            throw new Error('API key invalid or disabled. Generate a new key at ai.google.dev');
+          }
+          throw new Error(errMsg || `Gemini API Error (${res.status})`);
+        }
+
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) {
+          throw new Error('Empty response from Gemini. Try again.');
+        }
+        return text;
+      }, 2, 2000); // 2 retries per model, 2 second delay
+    } catch (e: any) {
+      lastError = e;
+      console.log(`Model failed: ${e.message}, trying backup...`);
+      // Continue to backup model
+    }
   }
-  return text;
+  
+  throw lastError;
 }
 
 async function callOpenAICompatible(prompt: string, apiKey: string, type: string): Promise<string> {
@@ -298,7 +356,7 @@ async function callHuggingFace(prompt: string, apiKey: string): Promise<string> 
 }
 
 // ===========================================
-// MAIN CHAT FUNCTION
+// MAIN CHAT FUNCTION WITH AUTO-FALLBACK
 // ===========================================
 
 export async function chatWithGemini(
@@ -310,8 +368,11 @@ export async function chatWithGemini(
     hasPendingFiles?: boolean;
   }
 ): Promise<AIResponse> {
-  const provider = getActiveAIProvider();
-  if (!provider) {
+  const state = useStore.getState();
+  const allProviders = state.aiProviders;
+  const activeProvider = getActiveAIProvider();
+  
+  if (!activeProvider) {
     throw new Error('No API key configured. Add one in Settings.');
   }
 
@@ -342,39 +403,52 @@ export async function chatWithGemini(
   
   fullPrompt += `\n\n## USER REQUEST:\n${prompt}`;
 
-  try {
-    let text: string;
-    
-    switch (provider.type) {
-      case 'gemini':
-        text = await callGemini(fullPrompt, provider.apiKey);
-        break;
-      case 'groq':
-      case 'deepseek':
-      case 'openrouter':
-        text = await callOpenAICompatible(fullPrompt, provider.apiKey, provider.type);
-        break;
-      case 'huggingface':
-        text = await callHuggingFace(fullPrompt, provider.apiKey);
-        break;
-      default:
-        text = await callGemini(fullPrompt, provider.apiKey);
-    }
+  // Try with active provider first, then fallback to others
+  const providersToTry = [activeProvider, ...allProviders.filter(p => p.id !== activeProvider.id)];
+  let lastError: Error = new Error('No providers available');
 
-    // Clean and parse JSON
-    text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0]);
-      } catch {
-        return { action: 'message', message: text };
+  for (const provider of providersToTry) {
+    try {
+      let text: string;
+      
+      switch (provider.type) {
+        case 'gemini':
+          text = await callGemini(fullPrompt, provider.apiKey);
+          break;
+        case 'groq':
+        case 'deepseek':
+        case 'openrouter':
+          text = await callOpenAICompatible(fullPrompt, provider.apiKey, provider.type);
+          break;
+        case 'huggingface':
+          text = await callHuggingFace(fullPrompt, provider.apiKey);
+          break;
+        default:
+          text = await callGemini(fullPrompt, provider.apiKey);
       }
+
+      // Clean and parse JSON
+      text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch {
+          return { action: 'message', message: text };
+        }
+      }
+      return { action: 'message', message: text };
+      
+    } catch (e: any) {
+      lastError = e;
+      console.log(`Provider ${provider.type} failed: ${e.message}, trying next...`);
+      // Continue to next provider
     }
-    return { action: 'message', message: text };
-  } catch (e: any) {
-    throw new Error(e.message || 'AI request failed');
+  }
+
+  // All providers failed
+  throw new Error(`Sabhi AI providers fail ho gaye. Last error: ${lastError.message}\n\nSuggestion: Settings mein ek aur AI provider add karo (Groq ya DeepSeek free hai).`);
   }
 }
 
