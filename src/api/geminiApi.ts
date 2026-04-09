@@ -13,8 +13,8 @@ import { useStore, getActiveAIProvider } from '../store/useStore';
 
 // API Endpoints for all providers
 const API_ENDPOINTS: Record<string, string> = {
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
-  gemini_backup: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+  gemini_backup: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
   huggingface: 'https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-70B-Instruct',
@@ -22,7 +22,7 @@ const API_ENDPOINTS: Record<string, string> = {
 };
 
 const MODELS: Record<string, string> = {
-  groq: 'llama-3.1-8b-instant',  // Smaller model for free tier - faster & within limits
+  groq: 'llama-3.1-8b-instant',  // Working! Fast & within free tier limits
   deepseek: 'deepseek-chat',
   openrouter: 'anthropic/claude-3.5-sonnet',
 };
